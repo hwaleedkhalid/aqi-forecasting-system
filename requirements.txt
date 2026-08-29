@@ -1,0 +1,28 @@
+# Core Dependencies
+requests>=2.31.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+tensorflow>=2.13.0
+shap>=0.42.0
+joblib>=1.3.0
+
+# Feature Store (Phase 16)
+hopsworks>=3.4.0
+
+# Web Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Dashboard
+streamlit>=1.28.0
+plotly>=5.18.0
+
+# Utilities
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0

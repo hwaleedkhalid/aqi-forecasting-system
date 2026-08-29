@@ -1,0 +1,53 @@
+# Pearls AQI Predictor
+
+## Byte-sized dependencies
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+## Virtual environment
+.venv/
+venv/
+ENV/
+
+## Environment variables (NEVER commit)
+.env
+
+## Data (generated at runtime)
+data/raw/
+data/processed/
+data/models/
+data/predictions/
+data/logs/
+
+## Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+## IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## TensorFlow
+*.h5
+saved_model/
+
+## Distribution
+dist/
+build/
+*.egg-info/
+
+## Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
