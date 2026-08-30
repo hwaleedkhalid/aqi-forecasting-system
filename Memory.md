@@ -26,8 +26,8 @@
 | :--- | :--- | :--- | :--- |
 | **Phase 1** | Project Setup & Configuration | **Completed** ✅ | 2026-08-30 |
 | **Phase 2** | Investigate Historical OpenWeather Data | **Completed** ✅ | 2026-08-30 |
-| **Phase 3** | Build OpenWeather Client | *Ready to Start* ⏳ | - |
-| **Phase 4** | Backfill Historical Data (~50k records) | Pending | - |
+| **Phase 3** | Build OpenWeather Client | **Completed** ✅ | 2026-08-30 |
+| **Phase 4** | Backfill Historical Data (~50k records) | *Ready to Start* ⏳ | - |
 | **Phase 5** | Explore Dataset & AQI Conversion | Pending | - |
 | **Phase 6** | Feature Engineering (Pollutants only) | Pending | - |
 | **Phase 7** | Multi-Output Training Dataset Prep | Pending | - |
@@ -52,8 +52,17 @@
 - `tests/test_phase1_setup.py` (34 passing tests, 100% coverage).
 
 ### Phase 2: OpenWeather API Investigation
-- Verified live connectivity to OpenWeather Air Pollution endpoints (Current, History, Forecast) and Weather API.
+- Verified live connectivity to OpenWeather Air Pollution endpoints (Current, History, Forecast).
 - Confirmed global historical availability from Nov 27, 2020 (`1606482000` UTC) with hourly frequency.
-- Verified schema for 8 criteria pollutants: $CO, NO, NO_2, O_3, SO_2, PM_{2.5}, PM_{10}, NH_3$ in $\mu g/m^3$.
 - Implemented and demonstrated piecewise linear interpolation for EPA PM2.5 AQI calculation vs OpenWeather's 1-5 CAQI index.
 - Created executable notebook [`notebooks/01_api_investigation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/01_api_investigation.ipynb).
+
+### Phase 3: OpenWeather Ingestion Client
+- Built abstract interface [`src/data_ingestion/base_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/base_provider.py).
+- Built concrete client [`src/data_ingestion/openweather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/openweather_provider.py) supporting:
+  - Current, forecast, and historical air pollution endpoints.
+  - Exponential backoff retry logic (on 5xx, 429, timeouts).
+  - Strict schema, coordinate, pollutant concentrations, and timestamp validation.
+  - Safe credential logging redaction.
+  - Chronological timestamp sorting and boundary deduplication.
+- Built test suite [`tests/test_data_ingestion.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_data_ingestion.py) (62 total project tests passing, 98% overall coverage).
