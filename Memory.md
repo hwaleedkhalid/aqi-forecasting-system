@@ -25,8 +25,8 @@
 | Phase | Description | Status | Completion Date |
 | :--- | :--- | :--- | :--- |
 | **Phase 1** | Project Setup & Configuration | **Completed** ✅ | 2026-08-30 |
-| **Phase 2** | Investigate Historical OpenWeather Data | *Ready to Start* ⏳ | - |
-| **Phase 3** | Build OpenWeather Client | Pending | - |
+| **Phase 2** | Investigate Historical OpenWeather Data | **Completed** ✅ | 2026-08-30 |
+| **Phase 3** | Build OpenWeather Client | *Ready to Start* ⏳ | - |
 | **Phase 4** | Backfill Historical Data (~50k records) | Pending | - |
 | **Phase 5** | Explore Dataset & AQI Conversion | Pending | - |
 | **Phase 6** | Feature Engineering (Pollutants only) | Pending | - |
@@ -45,13 +45,15 @@
 
 ---
 
-## 4. Current State & Deliverables (Phase 1)
-- **Directory Structure**: Initialized with all `data/`, `notebooks/`, `src/`, `tests/`, and `.github/` directories.
-- **Environment**: Virtual environment created (`.venv`), dependencies installed.
-- **Config & Core Utilities**:
-  - `src/config.py`: Centralized configuration constants and hyperparameters.
-  - `src/logger.py`: Standard logging to console and `data/logs/pearls_aqi.log`.
-  - `src/exceptions.py`: Custom domain exceptions (`DataIngestionError`, `FeatureStoreError`, `ModelTrainingError`, `PredictionError`, `ValidationError`).
-  - `.env.example` & `.env`: Environment variable management.
-  - `.gitignore`: Configured to exclude runtime data, secrets, and cache files.
-- **Tests**: `tests/test_phase1_setup.py` (34 test cases passing, 100% test coverage on `src`).
+## 4. Current State & Deliverables
+### Phase 1: Setup & Configuration
+- Directory structure, `.env.example`, `.env`, `requirements.txt`, `.gitignore`, `README.md`.
+- `src/config.py`, `src/logger.py`, `src/exceptions.py`.
+- `tests/test_phase1_setup.py` (34 passing tests, 100% coverage).
+
+### Phase 2: OpenWeather API Investigation
+- Verified live connectivity to OpenWeather Air Pollution endpoints (Current, History, Forecast) and Weather API.
+- Confirmed global historical availability from Nov 27, 2020 (`1606482000` UTC) with hourly frequency.
+- Verified schema for 8 criteria pollutants: $CO, NO, NO_2, O_3, SO_2, PM_{2.5}, PM_{10}, NH_3$ in $\mu g/m^3$.
+- Implemented and demonstrated piecewise linear interpolation for EPA PM2.5 AQI calculation vs OpenWeather's 1-5 CAQI index.
+- Created executable notebook [`notebooks/01_api_investigation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/01_api_investigation.ipynb).
