@@ -27,8 +27,8 @@
 | **Phase 1** | Project Setup & Configuration | **Completed** ✅ | 2026-08-30 |
 | **Phase 2** | Investigate Historical OpenWeather Data | **Completed** ✅ | 2026-08-30 |
 | **Phase 3** | Build OpenWeather Client | **Completed** ✅ | 2026-08-30 |
-| **Phase 4** | Backfill Historical Data (~50k records) | *Ready to Start* ⏳ | - |
-| **Phase 5** | Explore Dataset & AQI Conversion | Pending | - |
+| **Phase 4** | Backfill Historical Data (~50k records) | **Completed** ✅ | 2026-08-31 |
+| **Phase 5** | Explore Dataset & AQI Conversion | *Ready to Start* ⏳ | - |
 | **Phase 6** | Feature Engineering (Pollutants only) | Pending | - |
 | **Phase 7** | Multi-Output Training Dataset Prep | Pending | - |
 | **Phase 8** | Train Ridge Regression & Naive Baseline | Pending | - |
@@ -59,10 +59,13 @@
 
 ### Phase 3: OpenWeather Ingestion Client
 - Built abstract interface [`src/data_ingestion/base_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/base_provider.py).
-- Built concrete client [`src/data_ingestion/openweather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/openweather_provider.py) supporting:
-  - Current, forecast, and historical air pollution endpoints.
-  - Exponential backoff retry logic (on 5xx, 429, timeouts).
-  - Strict schema, coordinate, pollutant concentrations, and timestamp validation.
-  - Safe credential logging redaction.
-  - Chronological timestamp sorting and boundary deduplication.
-- Built test suite [`tests/test_data_ingestion.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_data_ingestion.py) (62 total project tests passing, 98% overall coverage).
+- Built concrete client [`src/data_ingestion/openweather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/openweather_provider.py) (100% test coverage).
+- Built test suite [`tests/test_data_ingestion.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_data_ingestion.py).
+
+### Phase 4: Historical Data Backfill
+- Built backfill pipeline [`src/feature_pipeline/backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/backfill.py) with monthly chunking, resumability, atomic writes, and completeness audit.
+- Ingested **70 raw monthly JSON partitions** (`data/raw/air_quality/2020-11.json` through `2026-08.json`).
+- Retrieved **49,483 unique hourly observations** spanning Nov 27, 2020 to Aug 31, 2026 for Lahore.
+- Completed audit: **98.05% dataset completeness** ($\ge 95\%$ target: **PASS**), saved to `data/raw/air_quality/backfill_summary.json`.
+- Built test suite [`tests/test_backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_backfill.py) (72 total project tests passing, 94% coverage).
+- Created exploration & audit notebook [`notebooks/02_raw_data_exploration.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/02_raw_data_exploration.ipynb).

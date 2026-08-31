@@ -320,6 +320,18 @@ class TestPayloadSchemaValidation:
             provider.fetch_current_air_quality(31.5497, 74.3436)
 
     @patch("requests.get")
+    def test_empty_records_when_min_expected(
+        self, mock_get: MagicMock, provider: OpenWeatherProvider
+    ) -> None:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"list": []}
+        mock_get.return_value = mock_resp
+
+        with pytest.raises(ValidationError, match="Expected at least 1 records, got 0"):
+            provider.fetch_current_air_quality(31.5497, 74.3436)
+
+    @patch("requests.get")
     def test_missing_dt_timestamp(
         self, mock_get: MagicMock, provider: OpenWeatherProvider
     ) -> None:

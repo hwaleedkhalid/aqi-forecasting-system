@@ -324,7 +324,7 @@ class OpenWeatherProvider(DataProvider):
                 raise ValidationError(f"Record at index {i} missing 'main.aqi'")
 
             aqi_val = item["main"]["aqi"]
-            if not isinstance(aqi_val, int) or not (1 <= aqi_val <= 5):
+            if not isinstance(aqi_val, (int, float)) or not (1.0 <= round(float(aqi_val)) <= 5.0):
                 raise ValidationError(
                     f"Record at index {i} has invalid OpenWeather CAQI value {aqi_val} (expected 1-5)"
                 )
@@ -340,7 +340,8 @@ class OpenWeatherProvider(DataProvider):
                         f"Record at index {i} missing required pollutant '{pollutant}'"
                     )
                 val = components[pollutant]
-                if not isinstance(val, (int, float)) or val < 0:
+                # OpenWeather uses -9999 as sentinel for missing sensor data in raw historical feeds
+                if not isinstance(val, (int, float)) or (val < 0 and val != -9999):
                     raise ValidationError(
                         f"Record at index {i} pollutant '{pollutant}' has invalid concentration: {val}"
                     )
