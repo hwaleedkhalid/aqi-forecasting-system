@@ -30,8 +30,8 @@
 | **Phase 4** | Backfill Historical Data (~50k records) | **Completed** ✅ | 2026-08-31 |
 | **Phase 5** | Explore Dataset & AQI Conversion | **Completed** ✅ | 2026-08-31 |
 | **Phase 6** | Feature Engineering (Pollutants only) | **Completed** ✅ | 2026-08-31 |
-| **Phase 7** | Multi-Output Training Dataset Prep | *Ready to Start* ⏳ | - |
-| **Phase 8** | Train Ridge Regression & Naive Baseline | Pending | - |
+| **Phase 7** | Multi-Output Training Dataset Prep | **Completed** ✅ | 2026-08-31 |
+| **Phase 8** | Train Ridge Regression & Naive Baseline | *Ready to Start* ⏳ | - |
 | **Phase 9** | Train Random Forest Regressor | Pending | - |
 | **Phase 10**| Train TensorFlow Neural Network | Pending | - |
 | **Phase 11**| Model Evaluation & Walk-Forward Validation | Pending | - |
@@ -64,19 +64,29 @@
 ### Phase 4: Historical Data Backfill
 - Built backfill pipeline [`src/feature_pipeline/backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/backfill.py) with monthly chunking, resumability, atomic writes, and completeness audit.
 - Ingested **70 raw monthly JSON partitions** (`data/raw/air_quality/2020-11.json` through `2026-08.json`).
-- Retrieved **49,483 unique hourly observations** spanning Nov 27, 2020 to Aug 31, 2026 for Lahore (98.05% completeness, passing $\ge 95\%$ requirement).
+- Retrieved **49,483 unique hourly observations** (98.05% completeness, passing $\ge 95\%$ requirement).
 - Built test suite [`tests/test_backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_backfill.py).
 - Created exploration & audit notebook [`notebooks/02_raw_data_exploration.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/02_raw_data_exploration.ipynb).
 
 ### Phase 5: EDA & AQI Conversion
-- Built [`src/feature_pipeline/aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/aqi_calculator.py) with EPA piecewise linear interpolation formula for $PM_{2.5}, PM_{10}, O_3, NO_2, SO_2, CO$, dominant pollutant calculation, and sentinel handling (100% coverage).
+- Built [`src/feature_pipeline/aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/aqi_calculator.py) (100% coverage).
 - Built unit test suite [`tests/test_aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_aqi_calculator.py).
 - Generated clean labeled historical dataset [`data/processed/historical_aqi_clean.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/historical_aqi_clean.csv) (49,483 rows).
-- Created comprehensive analysis notebook [`notebooks/03_eda_and_aqi_conversion.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/03_eda_and_aqi_conversion.ipynb).
+- Created analysis notebook [`notebooks/03_eda_and_aqi_conversion.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/03_eda_and_aqi_conversion.ipynb).
 
 ### Phase 6: Feature Engineering
 - Built [`src/feature_pipeline/feature_engineering.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/feature_engineering.py) (100% test coverage) with strict anti-leakage time-alignment:
-  - 64 engineered backward-looking features (Lags: 1h, 3h, 6h, 12h, 24h; Rolling: 6h, 12h, 24h mean/std/min/max; Ratios: $PM_{2.5}/PM_{10}$, $NO_2/O_3$, $CO/NO_2$; Cyclical: hour, day, month $\sin/\cos$).
-- Built unit test suite [`tests/test_feature_pipeline.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_feature_pipeline.py) (11 tests).
-- Persisted feature dataset [`data/processed/features.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/features.csv) (48,808 rows $\times$ 64 features) and schema [`data/processed/feature_schema.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/feature_schema.json).
+  - 64 engineered backward-looking features.
+- Built unit test suite [`tests/test_feature_pipeline.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_feature_pipeline.py).
+- Persisted feature dataset [`data/processed/features.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/features.csv) and schema [`data/processed/feature_schema.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/feature_schema.json).
 - Created analysis notebook [`notebooks/04_feature_engineering.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/04_feature_engineering.ipynb).
+
+### Phase 7: Multi-Output Training Dataset Prep
+- Built [`src/training_pipeline/dataset_builder.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/dataset_builder.py) (100% test coverage):
+  - Constructed 72-hour multi-output target matrix $Y = [y_{t+1}, \dots, y_{t+72}]$.
+  - Enforced chronological 80/20 train/test split with a 72-hour anti-leakage embargo gap.
+  - Scaled features with `StandardScaler` fitted strictly on $X_{\text{train}}$.
+  - Serialized dataset arrays: `X_train.npy` (38,917 $\times$ 64), `y_train.npy` (38,917 $\times$ 72), `X_test.npy` (9,748 $\times$ 64), `y_test.npy` (9,748 $\times$ 72).
+  - Serialized timestamps (`train_timestamps.csv`, `test_timestamps.csv`), scaler (`data/models/feature_scaler.joblib`), and summary (`data/processed/dataset_summary.json`).
+- Built unit test suite [`tests/test_dataset_builder.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_dataset_builder.py).
+- Created analysis notebook [`notebooks/05_dataset_preparation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/05_dataset_preparation.ipynb).
