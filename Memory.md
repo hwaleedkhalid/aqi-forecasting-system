@@ -31,8 +31,8 @@
 | **Phase 5** | Explore Dataset & AQI Conversion | **Completed** ✅ | 2026-08-31 |
 | **Phase 6** | Feature Engineering (Pollutants only) | **Completed** ✅ | 2026-08-31 |
 | **Phase 7** | Multi-Output Training Dataset Prep | **Completed** ✅ | 2026-08-31 |
-| **Phase 8** | Train Ridge Regression & Naive Baseline | *Ready to Start* ⏳ | - |
-| **Phase 9** | Train Random Forest Regressor | Pending | - |
+| **Phase 8** | Train Ridge Regression & Naive Baseline | **Completed** ✅ | 2026-08-31 |
+| **Phase 9** | Train Random Forest Regressor | *Ready to Start* ⏳ | - |
 | **Phase 10**| Train TensorFlow Neural Network | Pending | - |
 | **Phase 11**| Model Evaluation & Walk-Forward Validation | Pending | - |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
@@ -62,9 +62,8 @@
 - Built test suite [`tests/test_data_ingestion.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_data_ingestion.py).
 
 ### Phase 4: Historical Data Backfill
-- Built backfill pipeline [`src/feature_pipeline/backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/backfill.py) with monthly chunking, resumability, atomic writes, and completeness audit.
-- Ingested **70 raw monthly JSON partitions** (`data/raw/air_quality/2020-11.json` through `2026-08.json`).
-- Retrieved **49,483 unique hourly observations** (98.05% completeness, passing $\ge 95\%$ requirement).
+- Built backfill pipeline [`src/feature_pipeline/backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/backfill.py).
+- Ingested **70 raw monthly JSON partitions** (49,483 hourly observations, 98.05% completeness).
 - Built test suite [`tests/test_backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_backfill.py).
 - Created exploration & audit notebook [`notebooks/02_raw_data_exploration.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/02_raw_data_exploration.ipynb).
 
@@ -75,18 +74,24 @@
 - Created analysis notebook [`notebooks/03_eda_and_aqi_conversion.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/03_eda_and_aqi_conversion.ipynb).
 
 ### Phase 6: Feature Engineering
-- Built [`src/feature_pipeline/feature_engineering.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/feature_engineering.py) (100% test coverage) with strict anti-leakage time-alignment:
-  - 64 engineered backward-looking features.
+- Built [`src/feature_pipeline/feature_engineering.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/feature_engineering.py) (100% test coverage): 64 engineered backward-looking features.
 - Built unit test suite [`tests/test_feature_pipeline.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_feature_pipeline.py).
 - Persisted feature dataset [`data/processed/features.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/features.csv) and schema [`data/processed/feature_schema.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/feature_schema.json).
 - Created analysis notebook [`notebooks/04_feature_engineering.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/04_feature_engineering.ipynb).
 
 ### Phase 7: Multi-Output Training Dataset Prep
-- Built [`src/training_pipeline/dataset_builder.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/dataset_builder.py) (100% test coverage):
-  - Constructed 72-hour multi-output target matrix $Y = [y_{t+1}, \dots, y_{t+72}]$.
-  - Enforced chronological 80/20 train/test split with a 72-hour anti-leakage embargo gap.
-  - Scaled features with `StandardScaler` fitted strictly on $X_{\text{train}}$.
-  - Serialized dataset arrays: `X_train.npy` (38,917 $\times$ 64), `y_train.npy` (38,917 $\times$ 72), `X_test.npy` (9,748 $\times$ 64), `y_test.npy` (9,748 $\times$ 72).
-  - Serialized timestamps (`train_timestamps.csv`, `test_timestamps.csv`), scaler (`data/models/feature_scaler.joblib`), and summary (`data/processed/dataset_summary.json`).
+- Built [`src/training_pipeline/dataset_builder.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/dataset_builder.py) (100% test coverage).
+- Enforced chronological 80/20 train/test split with 72h anti-leakage embargo gap.
+- Serialized dataset arrays: `X_train.npy` (38,917 $\times$ 64), `y_train.npy` (38,917 $\times$ 72), `X_test.npy` (9,748 $\times$ 64), `y_test.npy` (9,748 $\times$ 72), `current_aqi_train.npy`, `current_aqi_test.npy`.
 - Built unit test suite [`tests/test_dataset_builder.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_dataset_builder.py).
 - Created analysis notebook [`notebooks/05_dataset_preparation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/05_dataset_preparation.ipynb).
+
+### Phase 8: Ridge Regression & Naive Baseline
+- Built [`src/models/base_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/base_model.py), [`src/models/naive_baseline.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/naive_baseline.py), and [`src/models/ridge_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/ridge_model.py).
+- Built [`src/training_pipeline/evaluator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/evaluator.py) and [`src/training_pipeline/trainer.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/trainer.py).
+- Trained and benchmarked Ridge Regression against Naive Persistence Baseline across all 72 horizons:
+  - **Naive Baseline**: Overall RMSE = **84.05**, MAE = **46.27**, $R^2$ = **0.3576** (h+1 RMSE = 67.30, h+24 RMSE = 78.92, h+72 RMSE = 88.31).
+  - **Ridge Model**: Overall RMSE = **82.97** (**+1.29% vs Baseline**), MAE = **63.14**, $R^2$ = **0.3740** (h+1 RMSE = **53.18** / -21.0% error, h+24 RMSE = **76.89**, h+72 RMSE = 96.57).
+- Saved artifacts: `data/models/ridge_model.joblib` and `data/models/model_comparison.json`.
+- Built unit tests [`tests/test_models.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_models.py) and [`tests/test_evaluator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_evaluator.py).
+- Created analysis notebook [`notebooks/06_model_training_ridge.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/06_model_training_ridge.ipynb).

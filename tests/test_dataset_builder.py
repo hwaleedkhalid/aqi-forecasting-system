@@ -148,6 +148,8 @@ class TestScalingAndArtifacts:
         assert (tmp_path / "processed" / "y_train.npy").exists()
         assert (tmp_path / "processed" / "X_test.npy").exists()
         assert (tmp_path / "processed" / "y_test.npy").exists()
+        assert (tmp_path / "processed" / "current_aqi_train.npy").exists()
+        assert (tmp_path / "processed" / "current_aqi_test.npy").exists()
         assert (tmp_path / "processed" / "train_timestamps.csv").exists()
         assert (tmp_path / "processed" / "test_timestamps.csv").exists()
         assert (tmp_path / "processed" / "dataset_summary.json").exists()

@@ -229,6 +229,11 @@ class DatasetBuilder:
             save_scaler=True,
         )
 
+        # Extract unscaled ground truth current target value y_t for naive baseline
+        current_y = df_features.loc[timestamps, self.target_col]
+        current_aqi_train = current_y.loc[split_data["train_timestamps"]].values
+        current_aqi_test = current_y.loc[split_data["test_timestamps"]].values
+
         Y_train_arr = split_data["Y_train"].values
         Y_test_arr = split_data["Y_test"].values
 
@@ -237,6 +242,8 @@ class DatasetBuilder:
         np.save(self.output_dir / "y_train.npy", Y_train_arr)
         np.save(self.output_dir / "X_test.npy", X_test_scaled)
         np.save(self.output_dir / "y_test.npy", Y_test_arr)
+        np.save(self.output_dir / "current_aqi_train.npy", current_aqi_train)
+        np.save(self.output_dir / "current_aqi_test.npy", current_aqi_test)
 
         # Persist raw tabular DataFrames (CSV)
         split_data["X_train_raw"].to_csv(self.output_dir / "X_train_raw.csv", index=True)
@@ -244,21 +251,38 @@ class DatasetBuilder:
         split_data["Y_train"].to_csv(self.output_dir / "y_train.csv", index=True)
         split_data["Y_test"].to_csv(self.output_dir / "y_test.csv", index=True)
 
-        # Persist timestamps for walk-forward CV reproducibility
-        pd.DataFrame({"datetime_utc": split_data["train_timestamps"]}).to_csv(
-            self.output_dir / "train_timestamps.csv", index=False
-        )
-        pd.DataFrame({"datetime_utc": split_data["test_timestamps"]}).to_csv(
-            self.output_dir / "test_timestamps.csv", index=False
-        )
+        # Persist timestamps and ground-truth current AQI for evaluation/baseline reproducibility
+        pd.DataFrame({
+            "datetime_utc": split_data["train_timestamps"],
+            "current_aqi": current_aqi_train,
+        }).to_csv(self.output_dir / "train_timestamps.csv", index=False)
 
+        pd.DataFrame({
+            "datetime_utc": split_data["test_timestamps"],
+            "current_aqi": current_aqi_test,
+        }).to_csv(self.output_dir / "test_timestamps.csv", index=False)
+
+        total_samples = len(timestamps)
         summary = {
             "target_variable": self.target_col,
             "forecast_horizons": self.forecast_horizons,
             "total_features": len(feature_names),
             "feature_names": feature_names,
-            "train_samples": len(X_train_scaled),
-            "test_samples": len(X_test_scaled),
+            "total_supervised_pairs": total_samples,
+            "nominal_split_ratio": {
+                "train": self.train_ratio,
+                "test": round(1 - self.train_ratio, 2),
+            },
+            "actual_retained_counts": {
+                "train_samples": len(X_train_scaled),
+                "test_samples": len(X_test_scaled),
+                "embargoed_samples": split_data["embargoed_samples_count"],
+            },
+            "actual_retained_percentages": {
+                "train_pct": round(len(X_train_scaled) / total_samples * 100, 2),
+                "test_pct": round(len(X_test_scaled) / total_samples * 100, 2),
+                "embargo_pct": round(split_data["embargoed_samples_count"] / total_samples * 100, 2),
+            },
             "X_train_shape": list(X_train_scaled.shape),
             "y_train_shape": list(Y_train_arr.shape),
             "X_test_shape": list(X_test_scaled.shape),
@@ -273,7 +297,6 @@ class DatasetBuilder:
             },
             "split_timestamp_utc": split_data["split_timestamp"],
             "embargo_gap_hours": split_data["embargo_hours"],
-            "embargoed_samples_count": split_data["embargoed_samples_count"],
         }
 
         summary_file = self.output_dir / "dataset_summary.json"
