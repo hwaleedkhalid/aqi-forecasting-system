@@ -29,8 +29,8 @@
 | **Phase 3** | Build OpenWeather Client | **Completed** ✅ | 2026-08-30 |
 | **Phase 4** | Backfill Historical Data (~50k records) | **Completed** ✅ | 2026-08-31 |
 | **Phase 5** | Explore Dataset & AQI Conversion | **Completed** ✅ | 2026-08-31 |
-| **Phase 6** | Feature Engineering (Pollutants only) | *Ready to Start* ⏳ | - |
-| **Phase 7** | Multi-Output Training Dataset Prep | Pending | - |
+| **Phase 6** | Feature Engineering (Pollutants only) | **Completed** ✅ | 2026-08-31 |
+| **Phase 7** | Multi-Output Training Dataset Prep | *Ready to Start* ⏳ | - |
 | **Phase 8** | Train Ridge Regression & Naive Baseline | Pending | - |
 | **Phase 9** | Train Random Forest Regressor | Pending | - |
 | **Phase 10**| Train TensorFlow Neural Network | Pending | - |
@@ -72,4 +72,11 @@
 - Built [`src/feature_pipeline/aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/aqi_calculator.py) with EPA piecewise linear interpolation formula for $PM_{2.5}, PM_{10}, O_3, NO_2, SO_2, CO$, dominant pollutant calculation, and sentinel handling (100% coverage).
 - Built unit test suite [`tests/test_aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_aqi_calculator.py).
 - Generated clean labeled historical dataset [`data/processed/historical_aqi_clean.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/historical_aqi_clean.csv) (49,483 rows).
-- Created comprehensive analysis notebook [`notebooks/03_eda_and_aqi_conversion.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/03_eda_and_aqi_conversion.ipynb) documenting dominant pollutants ($PM_{2.5}$ at 87.0%), winter smog seasonality, diurnal cycles, and pollutant correlation matrices.
+- Created comprehensive analysis notebook [`notebooks/03_eda_and_aqi_conversion.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/03_eda_and_aqi_conversion.ipynb).
+
+### Phase 6: Feature Engineering
+- Built [`src/feature_pipeline/feature_engineering.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/feature_engineering.py) (100% test coverage) with strict anti-leakage time-alignment:
+  - 64 engineered backward-looking features (Lags: 1h, 3h, 6h, 12h, 24h; Rolling: 6h, 12h, 24h mean/std/min/max; Ratios: $PM_{2.5}/PM_{10}$, $NO_2/O_3$, $CO/NO_2$; Cyclical: hour, day, month $\sin/\cos$).
+- Built unit test suite [`tests/test_feature_pipeline.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_feature_pipeline.py) (11 tests).
+- Persisted feature dataset [`data/processed/features.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/features.csv) (48,808 rows $\times$ 64 features) and schema [`data/processed/feature_schema.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/feature_schema.json).
+- Created analysis notebook [`notebooks/04_feature_engineering.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/04_feature_engineering.ipynb).
