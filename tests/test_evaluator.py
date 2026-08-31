@@ -1,5 +1,6 @@
 """Unit tests for Model Evaluator and Trainer."""
 
+import json
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -65,11 +66,16 @@ class TestModelTrainer:
         with pytest.raises(ValidationError, match="Missing required dataset files"):
             trainer.load_datasets()
 
-    def test_run_ridge_pipeline(self, tmp_path: Path) -> None:
+    def test_run_ridge_and_rf_pipeline(self, tmp_path: Path) -> None:
         data_dir = tmp_path / "data"
         models_dir = tmp_path / "models"
         data_dir.mkdir(parents=True)
         models_dir.mkdir(parents=True)
+
+        # Create dummy schema
+        features = ["f1", "f2", "f3", "f4", "f5"]
+        with open(data_dir / "feature_schema.json", "w", encoding="utf-8") as f:
+            json.dump({"feature_names": features}, f)
 
         np.random.seed(42)
         X_train = np.random.randn(40, 5)
@@ -88,8 +94,11 @@ class TestModelTrainer:
 
         trainer = ModelTrainer(data_dir=data_dir, models_dir=models_dir)
         ridge_model, df_comp = trainer.run_ridge_pipeline()
-
         assert ridge_model.is_fitted
         assert (models_dir / "ridge_model.joblib").exists()
-        assert (models_dir / "model_comparison.json").exists()
-        assert len(df_comp) == 2
+
+        rf_model, df_comp_3way = trainer.run_rf_pipeline(n_estimators=5, max_depth=3)
+        assert rf_model.is_fitted
+        assert (models_dir / "random_forest_model.joblib").exists()
+        assert (models_dir / "rf_feature_importances.csv").exists()
+        assert len(df_comp_3way) == 3

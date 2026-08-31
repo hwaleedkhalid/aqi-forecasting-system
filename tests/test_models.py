@@ -1,4 +1,4 @@
-"""Unit tests for Forecasting Models (BaseModel, NaivePersistenceBaseline, RidgeAQIModel)."""
+"""Unit tests for Forecasting Models (BaseModel, NaivePersistenceBaseline, RidgeAQIModel, RandomForestAQIModel)."""
 
 from pathlib import Path
 import numpy as np
@@ -7,6 +7,7 @@ import pytest
 from src.exceptions import ModelTrainingError, ValidationError
 from src.models.base_model import BaseAQIModel
 from src.models.naive_baseline import NaivePersistenceBaseline
+from src.models.random_forest_model import RandomForestAQIModel
 from src.models.ridge_model import RidgeAQIModel
 
 
@@ -23,18 +24,15 @@ class TestNaivePersistenceBaseline:
         preds = baseline.predict_from_current(current_aqi)
 
         assert preds.shape == (3, 72)
-        # All columns for sample 0 must be 50.0
         assert np.all(preds[0, :] == 50.0)
         assert np.all(preds[1, :] == 120.0)
         assert np.all(preds[2, :] == 300.0)
 
     def test_predict_method_accepts_1d_and_2d_single_column(self) -> None:
         baseline = NaivePersistenceBaseline(forecast_horizons=24)
-        # 1D array
         p1 = baseline.predict(np.array([45.0, 80.0]))
         assert p1.shape == (2, 24)
 
-        # 2D (N, 1) array
         p2 = baseline.predict(np.array([[45.0], [80.0]]))
         assert p2.shape == (2, 24)
 
@@ -71,7 +69,6 @@ class TestRidgeAQIModel:
         assert model.is_fitted
         preds = model.predict(X)
         assert preds.shape == (50, 72)
-        # Ensure values are clamped in [0, 500]
         assert np.all(preds >= 0.0)
         assert np.all(preds <= 500.0)
 
@@ -107,3 +104,60 @@ class TestRidgeAQIModel:
         assert loaded.is_fitted
         preds = loaded.predict(X)
         assert preds.shape == (20, 12)
+
+
+# =============================================================================
+# Random Forest AQI Model Tests
+# =============================================================================
+
+class TestRandomForestAQIModel:
+    """Test RandomForestAQIModel fitting, multi-output prediction, and feature importances."""
+
+    def test_fit_and_predict_multi_output(self) -> None:
+        np.random.seed(42)
+        X = np.random.randn(40, 6)
+        y = np.random.uniform(30, 200, (40, 12))
+
+        rf = RandomForestAQIModel(n_estimators=5, max_depth=3, random_state=42)
+        rf.fit(X, y)
+
+        assert rf.is_fitted
+        preds = rf.predict(X)
+        assert preds.shape == (40, 12)
+        assert np.all(preds >= 0.0)
+        assert np.all(preds <= 500.0)
+
+    def test_predict_unfitted_rf_raises_error(self) -> None:
+        rf = RandomForestAQIModel()
+        with pytest.raises(ModelTrainingError, match="must be fitted before calling predict"):
+            rf.predict(np.zeros((5, 10)))
+
+    def test_feature_importances(self) -> None:
+        X = np.random.randn(30, 4)
+        y = np.random.uniform(50, 150, (30, 6))
+        features = ["f1", "f2", "f3", "f4"]
+
+        rf = RandomForestAQIModel(n_estimators=5, max_depth=3)
+        rf.fit(X, y)
+        df_imp = rf.get_feature_importances(features)
+
+        assert len(df_imp) == 4
+        assert "feature" in df_imp.columns
+        assert "importance" in df_imp.columns
+        assert np.isclose(df_imp["importance"].sum(), 1.0)
+
+    def test_save_and_load_rf_model(self, tmp_path: Path) -> None:
+        X = np.random.randn(20, 4)
+        y = np.random.uniform(50, 150, (20, 6))
+
+        rf = RandomForestAQIModel(n_estimators=5, max_depth=3)
+        rf.fit(X, y)
+
+        model_file = tmp_path / "rf_model.joblib"
+        rf.save(model_file)
+
+        assert model_file.exists()
+        loaded = RandomForestAQIModel.load(model_file)
+        assert loaded.is_fitted
+        preds = loaded.predict(X)
+        assert preds.shape == (20, 6)

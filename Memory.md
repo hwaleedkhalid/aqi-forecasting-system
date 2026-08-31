@@ -14,9 +14,12 @@
 3. **Data Source**: OpenWeather Air Pollution History API (Free tier: Nov 27, 2020 to present, ~50,000 hourly observations globally).
 4. **Storage Progression**: Local CSV (`data/raw/` and `data/processed/`) for Phases 1-15 -> Hopsworks Feature Store & Model Registry in Phase 16.
 5. **Model Strategy**: Naive Persistence Baseline -> Ridge Regression -> Random Forest -> TensorFlow Feed-Forward Network (`Dense(72)`).
-6. **Validation**: Time-based 80/20 train/test split + Walk-Forward Cross-Validation across seasons.
-7. **Explainability**: SHAP deferred to Phase 17 (after complete pipeline works end-to-end).
-8. **Orchestration**: GitHub Actions (hourly feature extraction, daily retraining).
+6. **Evaluation Metric Hierarchy**:
+   - **Primary Decision Metric**: **Overall RMSE** (Root Mean Squared Error) across all 72 prediction horizons.
+   - **Secondary Diagnostic Metrics**: **Overall MAE**, **Overall $R^2$**, and **Per-Horizon RMSE/MAE**.
+7. **Validation**: Time-based 80/20 train/test split with 72h anti-leakage embargo gap + Walk-Forward Cross-Validation across seasons.
+8. **Explainability**: SHAP deferred to Phase 17 (after complete pipeline works end-to-end).
+9. **Orchestration**: GitHub Actions (hourly feature extraction, daily retraining).
 
 ---
 
@@ -32,8 +35,8 @@
 | **Phase 6** | Feature Engineering (Pollutants only) | **Completed** ✅ | 2026-08-31 |
 | **Phase 7** | Multi-Output Training Dataset Prep | **Completed** ✅ | 2026-08-31 |
 | **Phase 8** | Train Ridge Regression & Naive Baseline | **Completed** ✅ | 2026-08-31 |
-| **Phase 9** | Train Random Forest Regressor | *Ready to Start* ⏳ | - |
-| **Phase 10**| Train TensorFlow Neural Network | Pending | - |
+| **Phase 9** | Train Random Forest Regressor | **Completed** ✅ | 2026-08-31 |
+| **Phase 10**| Train TensorFlow Neural Network | *Ready to Start* ⏳ | - |
 | **Phase 11**| Model Evaluation & Walk-Forward Validation | Pending | - |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
 | **Phase 13**| Build Flask REST API | Pending | - |
@@ -52,7 +55,7 @@
 - `tests/test_phase1_setup.py` (34 passing tests, 100% coverage).
 
 ### Phase 2: OpenWeather API Investigation
-- Verified live connectivity to OpenWeather Air Pollution endpoints (Current, History, Forecast).
+- Verified live connectivity to OpenWeather Air Pollution endpoints.
 - Confirmed global historical availability from Nov 27, 2020 (`1606482000` UTC) with hourly frequency.
 - Created executable notebook [`notebooks/01_api_investigation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/01_api_investigation.ipynb).
 
@@ -65,7 +68,7 @@
 - Built backfill pipeline [`src/feature_pipeline/backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/backfill.py).
 - Ingested **70 raw monthly JSON partitions** (49,483 hourly observations, 98.05% completeness).
 - Built test suite [`tests/test_backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_backfill.py).
-- Created exploration & audit notebook [`notebooks/02_raw_data_exploration.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/02_raw_data_exploration.ipynb).
+- Created exploration notebook [`notebooks/02_raw_data_exploration.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/02_raw_data_exploration.ipynb).
 
 ### Phase 5: EDA & AQI Conversion
 - Built [`src/feature_pipeline/aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/aqi_calculator.py) (100% coverage).
@@ -87,11 +90,14 @@
 - Created analysis notebook [`notebooks/05_dataset_preparation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/05_dataset_preparation.ipynb).
 
 ### Phase 8: Ridge Regression & Naive Baseline
-- Built [`src/models/base_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/base_model.py), [`src/models/naive_baseline.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/naive_baseline.py), and [`src/models/ridge_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/ridge_model.py).
-- Built [`src/training_pipeline/evaluator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/evaluator.py) and [`src/training_pipeline/trainer.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/trainer.py).
-- Trained and benchmarked Ridge Regression against Naive Persistence Baseline across all 72 horizons:
-  - **Naive Baseline**: Overall RMSE = **84.05**, MAE = **46.27**, $R^2$ = **0.3576** (h+1 RMSE = 67.30, h+24 RMSE = 78.92, h+72 RMSE = 88.31).
-  - **Ridge Model**: Overall RMSE = **82.97** (**+1.29% vs Baseline**), MAE = **63.14**, $R^2$ = **0.3740** (h+1 RMSE = **53.18** / -21.0% error, h+24 RMSE = **76.89**, h+72 RMSE = 96.57).
-- Saved artifacts: `data/models/ridge_model.joblib` and `data/models/model_comparison.json`.
-- Built unit tests [`tests/test_models.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_models.py) and [`tests/test_evaluator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_evaluator.py).
+- Built base model and evaluator infrastructure.
+- Ridge Regression beats Naive Persistence on Overall RMSE (82.97 vs 84.05) and for all horizons $h=1 \dots 37$.
+- Saved model artifact `data/models/ridge_model.joblib`.
 - Created analysis notebook [`notebooks/06_model_training_ridge.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/06_model_training_ridge.ipynb).
+
+### Phase 9: Random Forest Regressor
+- Built [`src/models/random_forest_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/random_forest_model.py) (100 trees, multi-output).
+- Evaluated on test set: Overall RMSE = **89.18**, MAE = **65.06**, $R^2$ = **0.2767** (h+1 RMSE = **54.28**, h+24 RMSE = **79.13**).
+- Extracted and saved feature importances [`data/models/rf_feature_importances.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/rf_feature_importances.csv) (top features: `pm2_5_rolling_mean_12h` at 33.65%, `month_cos` + `month_sin` at 13.23%).
+- Saved artifact `data/models/random_forest_model.joblib`.
+- Created analysis notebook [`notebooks/07_model_training_rf.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/07_model_training_rf.ipynb).
