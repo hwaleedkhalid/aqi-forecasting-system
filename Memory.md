@@ -10,14 +10,18 @@
 
 ## 2. Key Architectural Decisions (Locked)
 1. **Target**: 72 continuous hourly EPA AQI predictions (`[t+1, ..., t+72]`).
-2. **Features (Phases 1-15)**: Chemical atmospheric pollutants + derived temporal/lag features only. Historical weather excluded due to API paywalls.
-3. **Data Source**: OpenWeather Air Pollution History API (Free tier: Nov 27, 2020 to present, ~50,000 hourly observations globally).
-4. **Storage Progression**: Local CSV (`data/raw/` and `data/processed/`) for Phases 1-15 -> Hopsworks Feature Store & Model Registry in Phase 16.
-5. **Model Strategy**: Naive Persistence Baseline -> Ridge Regression -> Random Forest -> TensorFlow Feed-Forward Network (`Dense(72)`).
+2. **Features**: 114 weather-enriched features (chemical atmospheric pollutants + meteorology from Open-Meteo + derived temporal/lag/rolling features).
+3. **Data Sources**:
+   - OpenWeather Air Pollution History API (Nov 27, 2020 to present).
+   - Open-Meteo Historical Weather Archive (Nov 27, 2020 to present).
+4. **Storage Progression**: Local CSV & NPY (`data/raw/` and `data/processed/`) for Phases 1-15 -> Hopsworks Feature Store & Model Registry in Phase 16.
+5. **Model Strategy**: Naive Persistence Baseline -> Ridge Regression -> Random Forest -> TensorFlow Feed-Forward Network (`Dense(72)`) -> LightGBM Direct/Horizon strategies.
 6. **Evaluation Metric Hierarchy**:
    - **Primary Decision Metric**: **Overall RMSE** (Root Mean Squared Error) across all 72 prediction horizons.
    - **Secondary Diagnostic Metrics**: **Overall MAE**, **Overall $R^2$**, and **Per-Horizon RMSE/MAE**.
-7. **Validation**: Time-based 80/20 train/test split with 72h anti-leakage embargo gap + Walk-Forward Cross-Validation across seasons.
+7. **Validation Protocol**:
+   - Strict test set freeze: `X_test_v2` / `y_test_v2` held out completely untouched until final benchmark.
+   - Model selection evaluated exclusively via **3-Fold Expanding Chronological Cross-Validation** on training set.
 8. **Explainability**: SHAP deferred to Phase 17 (after complete pipeline works end-to-end).
 9. **Orchestration**: GitHub Actions (hourly feature extraction, daily retraining).
 
@@ -39,10 +43,10 @@
 | **Phase 10**| Train TensorFlow Neural Network | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5A**| Diagnostics & Distribution Shift | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5B**| Weather Ingestion & Enrichment | **Completed** ✅ | 2026-09-02 |
-| **Phase 10.5C**| Systematic Tuning & Experiment Registry | *Ready to Start* ⏳ | - |
-| **Phase 10.5D**| Forecasting Architecture Experiments | Pending | - |
+| **Phase 10.5C**| Systematic Tuning & Experiment Registry | **Completed** ✅ | 2026-09-02 |
+| **Phase 10.5D**| Forecasting Architecture Experiments | *Ready to Start* ⏳ | - |
 | **Phase 10.5E**| Final Untouched Test Benchmark | Pending | - |
-| **Phase 11**| Model Evaluation & Walk-Forward Validation | Pending | - |
+| **Phase 11**| Multi-Year Walk-Forward Cross-Validation | Pending | - |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
 | **Phase 13**| Build Flask REST API | Pending | - |
 | **Phase 14**| Build Streamlit UI Dashboard | Pending | - |
@@ -54,103 +58,17 @@
 ---
 
 ## 4. Current State & Deliverables
-### Phase 1: Setup & Configuration
-- Directory structure, `.env.example`, `.env`, `requirements.txt`, `.gitignore`, `README.md`.
-- `src/config.py`, `src/logger.py`, `src/exceptions.py`.
-- `tests/test_phase1_setup.py` (34 passing tests, 100% coverage).
 
-### Phase 2: OpenWeather API Investigation
-- Verified live connectivity to OpenWeather Air Pollution endpoints.
-- Confirmed global historical availability from Nov 27, 2020 (`1606482000` UTC) with hourly frequency.
-- Created executable notebook [`notebooks/01_api_investigation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/01_api_investigation.ipynb).
-
-### Phase 3: OpenWeather Ingestion Client
-- Built abstract interface [`src/data_ingestion/base_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/base_provider.py).
-- Built concrete client [`src/data_ingestion/openweather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/openweather_provider.py) (100% test coverage).
-- Built test suite [`tests/test_data_ingestion.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_data_ingestion.py).
-
-### Phase 4: Historical Data Backfill
-- Built backfill pipeline [`src/feature_pipeline/backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/backfill.py).
-- Ingested **70 raw monthly JSON partitions** (49,483 hourly observations, 98.05% completeness).
-- Built test suite [`tests/test_backfill.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_backfill.py).
-- Created exploration notebook [`notebooks/02_raw_data_exploration.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/02_raw_data_exploration.ipynb).
-
-### Phase 5: EDA & AQI Conversion
-- Built [`src/feature_pipeline/aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/aqi_calculator.py) (100% coverage).
-- Built unit test suite [`tests/test_aqi_calculator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_aqi_calculator.py).
-- Generated clean labeled historical dataset [`data/processed/historical_aqi_clean.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/historical_aqi_clean.csv) (49,483 rows).
-- Created analysis notebook [`notebooks/03_eda_and_aqi_conversion.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/03_eda_and_aqi_conversion.ipynb).
-
-### Phase 6: Feature Engineering
-- Built [`src/feature_pipeline/feature_engineering.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/feature_engineering.py) (100% test coverage): 64 engineered backward-looking features.
-- Built unit test suite [`tests/test_feature_pipeline.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_feature_pipeline.py).
-- Persisted feature dataset [`data/processed/features.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/features.csv) and schema [`data/processed/feature_schema.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/feature_schema.json).
-- Created analysis notebook [`notebooks/04_feature_engineering.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/04_feature_engineering.ipynb).
-
-### Phase 7: Multi-Output Training Dataset Prep
-- Built [`src/training_pipeline/dataset_builder.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/dataset_builder.py) (100% test coverage).
-- Enforced chronological 80/20 train/test split with 72h anti-leakage embargo gap.
-- Serialized dataset arrays: `X_train.npy` (38,917 $\times$ 64), `y_train.npy` (38,917 $\times$ 72), `X_test.npy` (9,748 $\times$ 64), `y_test.npy` (9,748 $\times$ 72), `current_aqi_train.npy`, `current_aqi_test.npy`.
-- Built unit test suite [`tests/test_dataset_builder.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_dataset_builder.py).
-- Created analysis notebook [`notebooks/05_dataset_preparation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/05_dataset_preparation.ipynb).
-
-### Phase 8: Ridge Regression & Naive Baseline
-- Built base model and evaluator infrastructure.
-- Ridge Regression beats Naive Persistence on Overall RMSE (82.97 vs 84.05) and for all horizons $h=1 \dots 37$.
-- Saved model artifact `data/models/ridge_model.joblib`.
-- Created analysis notebook [`notebooks/06_model_training_ridge.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/06_model_training_ridge.ipynb).
-
-### Phase 9: Random Forest Regressor
-- Built [`src/models/random_forest_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/random_forest_model.py) (100 trees, multi-output).
-- Evaluated on test set: Overall RMSE = **89.18**, MAE = **65.06**, $R^2$ = **0.2767** (h+1 RMSE = **54.28**, h+24 RMSE = **79.13**).
-- Extracted and saved feature importances [`data/models/rf_feature_importances.csv`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/rf_feature_importances.csv) (top features: `pm2_5_rolling_mean_12h` at 33.65%, `month_cos` + `month_sin` at 13.23%).
-- Saved artifact `data/models/random_forest_model.joblib`.
-- Created analysis notebook [`notebooks/07_model_training_rf.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/07_model_training_rf.ipynb).
-
-### Phase 10: TensorFlow Deep Neural Network
-- Built [`src/models/tensorflow_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/tensorflow_model.py) (93% test coverage).
-  - Architecture: `Input(64) → Dense(128, ReLU) + Dropout(0.3) → Dense(64, ReLU) + Dropout(0.2) → Dense(32, ReLU) → Dense(72, Linear)`.
-  - Training: Adam optimizer (lr=0.001), MSE loss, EarlyStopping (patience=10, restore_best_weights), ReduceLROnPlateau.
-  - **Validation from training data ONLY**: last 15% chronological tail of `X_train` used for early stopping; test partition never seen during training.
-- Training completed in **33 epochs** (early stopping at epoch 34, best weights restored from epoch 24, best val_loss = **8846.73**).
-- Evaluated on same held-out test set (9,748 samples) as all prior models: Overall RMSE = **85.01**, MAE = **65.94**, $R^2$ = **0.3428** (h+1 RMSE = **55.59**, h+24 RMSE = **78.74**, h+72 RMSE = **102.26**).
-- Saved artifacts: [`data/models/tensorflow_model.keras`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/tensorflow_model.keras), [`data/models/tf_training_history.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/tf_training_history.json).
-- Updated [`data/models/model_comparison.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/model_comparison.json) with 4-way benchmark.
-- Created analysis notebook [`notebooks/08_model_training_tf.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/08_model_training_tf.ipynb).
-- Built unit test suite [`tests/test_tensorflow_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_tensorflow_model.py) (7 tests).
-
-### Phase 10.5A: Diagnostics & Distribution Shift Analysis
-- Built [`src/training_pipeline/diagnostics.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/diagnostics.py) (97% test coverage):
-  - Train vs. Test distribution shift quantification:
-    - Train (2020–2025): Mean AQI = **257.1** (30.9% Hazardous, 22.6% Very Unhealthy).
-    - Test (2025–2026): Mean AQI = **169.6** (only 11.9% Hazardous, 26.6% Moderate) — **87.5 AQI points cleaner on average**.
-  - Seasonal Error Breakdown on Out-of-Time Test Set:
-    - **Winter Smog (Nov-Feb)**: Ridge beats Naive (**87.78 vs 93.04**; h+1: **47.57 vs 57.45**).
-    - **Spring/Summer (Mar-Jun)**: Ridge beats Naive (**84.49 vs 88.25**; h+1: **62.71 vs 80.41**).
-    - **Monsoon (Jul-Aug)**: Ridge beats Naive (**68.09 vs 74.91**; h+1: **48.99 vs 62.98**).
-  - AQI Severity Breakdown:
-    - **Hazardous AQI (>300)**: Ridge massively outperforms Naive with Overall RMSE **90.64 vs 164.41** (**+44.9% error reduction / 73.8 AQI points improvement**).
-- Generated report artifact [`data/processed/diagnostic_report.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/diagnostic_report.json).
-- Created analysis notebook [`notebooks/09_error_and_distribution_diagnostics.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/09_error_and_distribution_diagnostics.ipynb).
-- Built test suite [`tests/test_diagnostics.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_diagnostics.py).
-
-### Phase 10.5B: Open-Meteo Weather Ingestion & Feature Enrichment
-- Built [`src/data_ingestion/weather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/weather_provider.py) (85% coverage) fetching 50,496 hourly historical weather records (2020-11-27 to 2026-08-31) from the open-access Open-Meteo Historical Archive without API keys or paywalls.
-- Built [`src/feature_pipeline/weather_features.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/weather_features.py) (97% coverage) engineering 50 new meteorological features:
-  - Wind vector trigonometric harmonics (`wind_dir_sin`, `wind_dir_cos`).
-  - Barometric pressure tendency (`pressure_diff_1h`, `pressure_diff_24h`).
-  - Atmospheric stagnation dispersion index (`pm2_5 / (wind_speed + 0.5)`).
-  - Thermal-moisture index (`temp * (humidity / 100)`).
-  - Weather lags (1h, 3h, 6h, 12h, 24h) & rolling statistics (6h, 12h, 24h mean/std).
-- Built [`src/feature_pipeline/build_weather_dataset.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/build_weather_dataset.py) (98% coverage) building multi-output enriched datasets with 72h anti-leakage embargo gap:
-  - `X_train_v2`: (37,173, 114), `y_train_v2`: (37,173, 72)
-  - `X_test_v2`: (9,311, 114), `y_test_v2`: (9,311, 72)
-  - `feature_scaler_v2_weather.joblib`, `feature_schema_v2_weather.json`.
-- **Training-Only Chronological Validation Result (Ridge $\alpha=1.0$)**:
-  - Pollutants-only (v1 - 64 feats): Val RMSE = **97.08**, MAE = **74.35**, $R^2 = 0.4974$
-  - Weather-enriched (v2 - 114 feats): Val RMSE = **92.17**, MAE = **69.00**, $R^2 = 0.5201$
-  - **Immediate +5.06% RMSE reduction & 5.35 MAE reduction** purely from meteorological signal addition.
-- Built test suites: [`tests/test_weather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_weather_provider.py) & [`tests/test_weather_features.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_weather_features.py).
-- Created analysis notebook [`notebooks/10_weather_enrichment.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/10_weather_enrichment.ipynb).
-- **Total project: 135/135 tests passing, 92% coverage.**
-
+### Phase 10.5C: Systematic Model Tuning & Experiment Registry
+- Built [`src/training_pipeline/experiment_registry.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/experiment_registry.py) (85% coverage) to persist structured run artifacts, hyperparameters, metrics, and JSON/CSV leaderboards in `data/models/experiments/`.
+- Built [`src/training_pipeline/cv_evaluator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/cv_evaluator.py) (98% coverage) executing 3-fold expanding chronological training-only cross-validation.
+- Built [`src/models/lightgbm_models.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/lightgbm_models.py) (80% coverage) with `LightGBMDirectMultiOutput` and `LightGBMHorizonAsFeature`.
+- Built [`src/training_pipeline/run_systematic_experiments.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/run_systematic_experiments.py) executing 14 systematic training-only experiments.
+- **Key Validation Findings**:
+  - **Ridge Regression ($\alpha=1.0$)**: Optimal multi-horizon balance with Val RMSE = **85.74** ($\pm 4.86$), Val MAE = **63.59**, Val $R^2 = 0.5123$, $h+1$ RMSE = **52.66**, $h+24$ RMSE = **81.99**, $h+72$ RMSE = **92.39**, Training time = **0.19s**.
+  - **ElasticNet ($l_1=0.9$)**: Val RMSE = **85.76**, Val MAE = **63.55**, Val $R^2 = 0.5123$ (matches Ridge but with heavier coordinate descent overhead).
+  - **LightGBM Direct (72 estimators)**: Val RMSE = **90.86**, Val MAE = **65.89**, Val $R^2 = 0.4568$. Achieves best-in-class short-horizon accuracy at $h+1$ (**46.18 RMSE**, beating Ridge by **12.3%**), but higher long-horizon variance ($h+72$ RMSE = **104.60**).
+  - **LightGBM Horizon-as-Feature**: Val RMSE = **97.53**, Val MAE = **73.29**, Val $R^2 = 0.3762$.
+- Created analysis notebook [`notebooks/11_systematic_model_tuning.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/11_systematic_model_tuning.ipynb).
+- Built test suite [`tests/test_experiment_registry.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_experiment_registry.py).
+- **Total test suite**: **140/140 tests passing (88% coverage)**.

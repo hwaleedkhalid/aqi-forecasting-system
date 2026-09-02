@@ -1,6 +1,10 @@
 """Model package — base definitions and model implementations."""
 
 from src.models.base_model import BaseAQIModel
+from src.models.lightgbm_models import (
+    LightGBMDirectMultiOutput,
+    LightGBMHorizonAsFeature,
+)
 from src.models.naive_baseline import NaivePersistenceBaseline
 from src.models.random_forest_model import RandomForestAQIModel
 from src.models.ridge_model import RidgeAQIModel
@@ -23,6 +27,8 @@ __all__ = [
     "NaivePersistenceBaseline",
     "RidgeAQIModel",
     "RandomForestAQIModel",
+    "LightGBMDirectMultiOutput",
+    "LightGBMHorizonAsFeature",
     "TensorFlowAQIModel",
     "get_tensorflow_model_class",
 ]
