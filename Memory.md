@@ -15,7 +15,7 @@
    - OpenWeather Air Pollution History API (Nov 27, 2020 to present).
    - Open-Meteo Historical Weather Archive (Nov 27, 2020 to present).
 4. **Storage Progression**: Local CSV & NPY (`data/raw/` and `data/processed/`) for Phases 1-15 -> Hopsworks Feature Store & Model Registry in Phase 16.
-5. **Model Strategy**: Naive Persistence Baseline -> Ridge Regression -> Random Forest -> TensorFlow Feed-Forward Network (`Dense(72)`) -> LightGBM Direct/Horizon strategies.
+5. **Model Strategy**: Naive Persistence Baseline -> Ridge Regression -> Random Forest -> TensorFlow Feed-Forward Network (`Dense(72)`) -> Hybrid Specialist Ensemble (LightGBM h1-6 + Ridge h7-72).
 6. **Evaluation Metric Hierarchy**:
    - **Primary Decision Metric**: **Overall RMSE** (Root Mean Squared Error) across all 72 prediction horizons.
    - **Secondary Diagnostic Metrics**: **Overall MAE**, **Overall $R^2$**, and **Per-Horizon RMSE/MAE**.
@@ -44,8 +44,8 @@
 | **Phase 10.5A**| Diagnostics & Distribution Shift | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5B**| Weather Ingestion & Enrichment | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5C**| Systematic Tuning & Experiment Registry | **Completed** ✅ | 2026-09-02 |
-| **Phase 10.5D**| Forecasting Architecture Experiments | *Ready to Start* ⏳ | - |
-| **Phase 10.5E**| Final Untouched Test Benchmark | Pending | - |
+| **Phase 10.5D**| Forecasting Architecture Experiments | **Completed** ✅ | 2026-09-02 |
+| **Phase 10.5E**| Final Untouched Test Benchmark | *Ready to Start* ⏳ | - |
 | **Phase 11**| Multi-Year Walk-Forward Cross-Validation | Pending | - |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
 | **Phase 13**| Build Flask REST API | Pending | - |
@@ -59,16 +59,21 @@
 
 ## 4. Current State & Deliverables
 
-### Phase 10.5C: Systematic Model Tuning & Experiment Registry
-- Built [`src/training_pipeline/experiment_registry.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/experiment_registry.py) (85% coverage) to persist structured run artifacts, hyperparameters, metrics, and JSON/CSV leaderboards in `data/models/experiments/`.
-- Built [`src/training_pipeline/cv_evaluator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/cv_evaluator.py) (98% coverage) executing 3-fold expanding chronological training-only cross-validation.
-- Built [`src/models/lightgbm_models.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/lightgbm_models.py) (80% coverage) with `LightGBMDirectMultiOutput` and `LightGBMHorizonAsFeature`.
-- Built [`src/training_pipeline/run_systematic_experiments.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/run_systematic_experiments.py) executing 14 systematic training-only experiments.
+### Phase 10.5D: Forecasting Architecture Experiments
+- Built [`src/models/pollutant_to_aqi_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/pollutant_to_aqi_model.py) (79% coverage) with vectorized US EPA piecewise interpolation for continuous pollutant arrays.
+- Built [`src/models/grouped_horizon_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/grouped_horizon_model.py) (67% coverage) with 3-tier partitioned horizon regressors ($h1-6$, $h7-24$, $h25-72$).
+- Built [`src/models/hybrid_specialist_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/models/hybrid_specialist_model.py) (68% coverage) implementing:
+  - `HybridAQISpecialistModel` (LightGBM $h1-6$ + Ridge $h7-72$).
+  - `PersistenceAwareHybridModel` (LightGBM $h1-6$ + Ridge $h7-37$ + Blended Ridge/Persistence $h38-72$).
+- Built [`src/training_pipeline/run_architecture_experiments.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/run_architecture_experiments.py) executing 5 architectural experiments across 3 expanding chronological folds.
 - **Key Validation Findings**:
-  - **Ridge Regression ($\alpha=1.0$)**: Optimal multi-horizon balance with Val RMSE = **85.74** ($\pm 4.86$), Val MAE = **63.59**, Val $R^2 = 0.5123$, $h+1$ RMSE = **52.66**, $h+24$ RMSE = **81.99**, $h+72$ RMSE = **92.39**, Training time = **0.19s**.
-  - **ElasticNet ($l_1=0.9$)**: Val RMSE = **85.76**, Val MAE = **63.55**, Val $R^2 = 0.5123$ (matches Ridge but with heavier coordinate descent overhead).
-  - **LightGBM Direct (72 estimators)**: Val RMSE = **90.86**, Val MAE = **65.89**, Val $R^2 = 0.4568$. Achieves best-in-class short-horizon accuracy at $h+1$ (**46.18 RMSE**, beating Ridge by **12.3%**), but higher long-horizon variance ($h+72$ RMSE = **104.60**).
-  - **LightGBM Horizon-as-Feature**: Val RMSE = **97.53**, Val MAE = **73.29**, Val $R^2 = 0.3762$.
-- Created analysis notebook [`notebooks/11_systematic_model_tuning.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/11_systematic_model_tuning.ipynb).
-- Built test suite [`tests/test_experiment_registry.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_experiment_registry.py).
-- **Total test suite**: **140/140 tests passing (88% coverage)**.
+  - **EXP-017 (Hybrid AQI Specialist)** achieved the **#1 overall performance across all 19 project experiments**:
+    - **Mean Val RMSE = 85.46** ($\pm 4.86$), **Mean Val MAE = 63.16**, **Mean Val $R^2 = 0.5154$**.
+    - **$h+1$ RMSE = 46.18** (matches LightGBM's state-of-the-art short-horizon precision, beating standalone Ridge's $52.66$ by **12.3%**).
+    - **$h+24$ RMSE = 81.99** & **$h+72$ RMSE = 92.39** (maintains Ridge's strong shrinkage stability across multi-day horizons).
+    - Training time: **11.41 seconds**.
+  - **EXP-019 (Persistence-Aware Hybrid)** delivered the lowest mean MAE (**62.95**).
+  - **EXP-015 / EXP-018 (Multi-Pollutant $\to$ EPA AQI)** revealed that taking the $\max(\cdot)$ operator across 6 predicted pollutant sub-indices compounds individual over-prediction estimation noise (RMSE = **92.19**).
+- Created analysis notebook [`notebooks/12_forecasting_architecture_experiments.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/12_forecasting_architecture_experiments.ipynb).
+- Built test suite [`tests/test_forecasting_architectures.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_forecasting_architectures.py).
+- **Total test suite**: **146/146 tests passing (80% total codebase coverage)**.

@@ -1,11 +1,21 @@
 """Model package — base definitions and model implementations."""
 
 from src.models.base_model import BaseAQIModel
+from src.models.grouped_horizon_model import GroupedHorizonModel
+from src.models.hybrid_specialist_model import (
+    HybridAQISpecialistModel,
+    PersistenceAwareHybridModel,
+)
 from src.models.lightgbm_models import (
     LightGBMDirectMultiOutput,
     LightGBMHorizonAsFeature,
 )
 from src.models.naive_baseline import NaivePersistenceBaseline
+from src.models.pollutant_to_aqi_model import (
+    MultiPollutantToAQIModel,
+    calculate_vectorized_epa_aqi,
+    calculate_vectorized_sub_index,
+)
 from src.models.random_forest_model import RandomForestAQIModel
 from src.models.ridge_model import RidgeAQIModel
 
@@ -29,6 +39,12 @@ __all__ = [
     "RandomForestAQIModel",
     "LightGBMDirectMultiOutput",
     "LightGBMHorizonAsFeature",
+    "GroupedHorizonModel",
+    "HybridAQISpecialistModel",
+    "PersistenceAwareHybridModel",
+    "MultiPollutantToAQIModel",
+    "calculate_vectorized_epa_aqi",
+    "calculate_vectorized_sub_index",
     "TensorFlowAQIModel",
     "get_tensorflow_model_class",
 ]
