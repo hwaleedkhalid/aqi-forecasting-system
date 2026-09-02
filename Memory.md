@@ -38,8 +38,8 @@
 | **Phase 9** | Train Random Forest Regressor | **Completed** ✅ | 2026-08-31 |
 | **Phase 10**| Train TensorFlow Neural Network | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5A**| Diagnostics & Distribution Shift | **Completed** ✅ | 2026-09-02 |
-| **Phase 10.5B**| Weather Ingestion & Enrichment | *In Progress* ⏳ | - |
-| **Phase 10.5C**| Systematic Tuning & Experiment Registry | Pending | - |
+| **Phase 10.5B**| Weather Ingestion & Enrichment | **Completed** ✅ | 2026-09-02 |
+| **Phase 10.5C**| Systematic Tuning & Experiment Registry | *Ready to Start* ⏳ | - |
 | **Phase 10.5D**| Forecasting Architecture Experiments | Pending | - |
 | **Phase 10.5E**| Final Untouched Test Benchmark | Pending | - |
 | **Phase 11**| Model Evaluation & Walk-Forward Validation | Pending | - |
@@ -133,5 +133,24 @@
 - Generated report artifact [`data/processed/diagnostic_report.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/diagnostic_report.json).
 - Created analysis notebook [`notebooks/09_error_and_distribution_diagnostics.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/09_error_and_distribution_diagnostics.ipynb).
 - Built test suite [`tests/test_diagnostics.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_diagnostics.py).
-- **Total project: 128/128 tests passing, 91% coverage.**
+
+### Phase 10.5B: Open-Meteo Weather Ingestion & Feature Enrichment
+- Built [`src/data_ingestion/weather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/data_ingestion/weather_provider.py) (85% coverage) fetching 50,496 hourly historical weather records (2020-11-27 to 2026-08-31) from the open-access Open-Meteo Historical Archive without API keys or paywalls.
+- Built [`src/feature_pipeline/weather_features.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/weather_features.py) (97% coverage) engineering 50 new meteorological features:
+  - Wind vector trigonometric harmonics (`wind_dir_sin`, `wind_dir_cos`).
+  - Barometric pressure tendency (`pressure_diff_1h`, `pressure_diff_24h`).
+  - Atmospheric stagnation dispersion index (`pm2_5 / (wind_speed + 0.5)`).
+  - Thermal-moisture index (`temp * (humidity / 100)`).
+  - Weather lags (1h, 3h, 6h, 12h, 24h) & rolling statistics (6h, 12h, 24h mean/std).
+- Built [`src/feature_pipeline/build_weather_dataset.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/build_weather_dataset.py) (98% coverage) building multi-output enriched datasets with 72h anti-leakage embargo gap:
+  - `X_train_v2`: (37,173, 114), `y_train_v2`: (37,173, 72)
+  - `X_test_v2`: (9,311, 114), `y_test_v2`: (9,311, 72)
+  - `feature_scaler_v2_weather.joblib`, `feature_schema_v2_weather.json`.
+- **Training-Only Chronological Validation Result (Ridge $\alpha=1.0$)**:
+  - Pollutants-only (v1 - 64 feats): Val RMSE = **97.08**, MAE = **74.35**, $R^2 = 0.4974$
+  - Weather-enriched (v2 - 114 feats): Val RMSE = **92.17**, MAE = **69.00**, $R^2 = 0.5201$
+  - **Immediate +5.06% RMSE reduction & 5.35 MAE reduction** purely from meteorological signal addition.
+- Built test suites: [`tests/test_weather_provider.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_weather_provider.py) & [`tests/test_weather_features.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_weather_features.py).
+- Created analysis notebook [`notebooks/10_weather_enrichment.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/10_weather_enrichment.ipynb).
+- **Total project: 135/135 tests passing, 92% coverage.**
 

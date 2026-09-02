@@ -10,6 +10,7 @@ from src.feature_pipeline.backfill import (
     generate_monthly_intervals,
 )
 from src.feature_pipeline.feature_engineering import FeatureEngineeringPipeline
+from src.feature_pipeline.weather_features import WeatherFeatureEngineer
 
 __all__ = [
     "HistoricalBackfillService",
@@ -18,4 +19,5 @@ __all__ = [
     "calculate_overall_aqi",
     "get_aqi_category",
     "FeatureEngineeringPipeline",
+    "WeatherFeatureEngineer",
 ]
