@@ -9,12 +9,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.config import MODELS_DIR, PROCESSED_DATA_DIR
+from src.config import (
+    MODELS_DIR,
+    PROCESSED_DATA_DIR,
+    TF_BATCH_SIZE,
+    TF_EARLY_STOPPING_PATIENCE,
+    TF_EPOCHS,
+    TF_LEARNING_RATE,
+)
 from src.exceptions import ModelTrainingError, ValidationError
 from src.logger import logger
 from src.models.naive_baseline import NaivePersistenceBaseline
 from src.models.random_forest_model import RandomForestAQIModel
 from src.models.ridge_model import RidgeAQIModel
+from src.models.tensorflow_model import TensorFlowAQIModel
 from src.training_pipeline.evaluator import ModelEvaluator
 
 
@@ -219,3 +227,129 @@ class ModelTrainer:
         )
 
         return rf_model, df_comparison
+
+    def _ensure_prior_evaluations(
+        self,
+        y_test: np.ndarray,
+        current_test: np.ndarray,
+        X_test: np.ndarray,
+    ) -> None:
+        """Populate evaluation dict with Naive Baseline, Ridge, and RF if missing.
+
+        This guarantees consistent N-way comparison tables regardless of
+        which pipeline method is called first.
+        """
+        n_horizons = y_test.shape[1]
+
+        # Naive Baseline
+        baseline = NaivePersistenceBaseline(forecast_horizons=n_horizons)
+        if baseline.name not in self.evaluations:
+            y_pred = baseline.predict_from_current(current_test)
+            self.evaluations[baseline.name] = ModelEvaluator.evaluate_predictions(
+                y_test, y_pred, model_name=baseline.name
+            )
+
+        # Ridge Regression
+        ridge_path = self.models_dir / "ridge_model.joblib"
+        ridge_key = "Ridge Regression (MultiOutput)"
+        if ridge_key not in self.evaluations and ridge_path.exists():
+            loaded = RidgeAQIModel.load(ridge_path)
+            y_pred = loaded.predict(X_test)
+            self.evaluations[ridge_key] = ModelEvaluator.evaluate_predictions(
+                y_test, y_pred, model_name=ridge_key
+            )
+
+        # Random Forest
+        rf_path = self.models_dir / "random_forest_model.joblib"
+        rf_key = "Random Forest Regressor"
+        if rf_key not in self.evaluations and rf_path.exists():
+            loaded = RandomForestAQIModel.load(rf_path)
+            y_pred = loaded.predict(X_test)
+            self.evaluations[rf_key] = ModelEvaluator.evaluate_predictions(
+                y_test, y_pred, model_name=rf_key
+            )
+
+    def run_tf_pipeline(
+        self,
+        epochs: int = TF_EPOCHS,
+        batch_size: int = TF_BATCH_SIZE,
+        learning_rate: float = TF_LEARNING_RATE,
+        patience: int = TF_EARLY_STOPPING_PATIENCE,
+    ) -> tuple[TensorFlowAQIModel, pd.DataFrame]:
+        """Execute Phase 10: TensorFlow DNN training and evaluation pipeline.
+
+        Validation protocol:
+            - The last 15% of `X_train` (chronological tail) is carved as
+              the early-stopping validation set.
+            - `X_test` / `y_test` are NEVER seen during training; they are
+              used ONLY for the final out-of-time benchmark evaluation.
+            - All four models are evaluated with the identical
+              `ModelEvaluator.evaluate_predictions` on the same `y_test`.
+
+        Args:
+            epochs: Maximum training epochs.
+            batch_size: Mini-batch size.
+            learning_rate: Initial Adam learning rate.
+            patience: Early stopping patience.
+
+        Returns:
+            Tuple of (trained TF model, 4-way comparison DataFrame).
+        """
+        data = self.load_datasets()
+        X_train, y_train = data["X_train"], data["y_train"]
+        X_test, y_test = data["X_test"], data["y_test"]
+        current_test = data["current_aqi_test"]
+
+        # Ensure all prior models are in the evaluation table
+        self._ensure_prior_evaluations(y_test, current_test, X_test)
+
+        # 1. Train TensorFlow DNN (validation from training data ONLY)
+        logger.info(
+            f"Training TensorFlow DNN (epochs={epochs}, batch={batch_size}, "
+            f"lr={learning_rate}, patience={patience})..."
+        )
+        tf_model = TensorFlowAQIModel(
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            patience=patience,
+        )
+        history = tf_model.fit(X_train, y_train)
+
+        # 2. Evaluate on held-out out-of-time test set
+        logger.info("Evaluating TensorFlow DNN on test set...")
+        y_pred_tf = tf_model.predict(X_test)
+        self.evaluations[tf_model.name] = ModelEvaluator.evaluate_predictions(
+            y_test, y_pred_tf, model_name=tf_model.name
+        )
+
+        # 3. Save model artifact (.keras format)
+        model_path = self.models_dir / "tensorflow_model.keras"
+        tf_model.save(model_path)
+
+        # 4. Save training history
+        import json as _json
+        hist_path = self.models_dir / "tf_training_history.json"
+        with open(hist_path, "w", encoding="utf-8") as f:
+            _json.dump({
+                "epochs_completed": history.epochs_completed,
+                "best_epoch": history.best_epoch,
+                "best_val_loss": history.best_val_loss,
+                "final_train_loss": history.final_train_loss,
+                "final_val_loss": history.final_val_loss,
+            }, f, indent=2)
+        logger.info(f"Saved TF training history to {hist_path}")
+
+        # 5. Generate and save 4-way comparison
+        df_comparison = ModelEvaluator.compare_models(self.evaluations)
+        ModelEvaluator.save_comparison(
+            self.evaluations, self.models_dir / "model_comparison.json"
+        )
+
+        logger.info(
+            "\n=== 4-Way Model Comparison on Test Partition ===\n"
+            + df_comparison.to_string(index=False)
+        )
+
+        return tf_model, df_comparison
+
