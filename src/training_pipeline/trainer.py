@@ -3,6 +3,8 @@
 Orchestrates model training, baseline evaluation, comparison tracking, and model artifact serialization.
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Any
@@ -22,7 +24,6 @@ from src.logger import logger
 from src.models.naive_baseline import NaivePersistenceBaseline
 from src.models.random_forest_model import RandomForestAQIModel
 from src.models.ridge_model import RidgeAQIModel
-from src.models.tensorflow_model import TensorFlowAQIModel
 from src.training_pipeline.evaluator import ModelEvaluator
 
 
@@ -304,6 +305,8 @@ class ModelTrainer:
         self._ensure_prior_evaluations(y_test, current_test, X_test)
 
         # 1. Train TensorFlow DNN (validation from training data ONLY)
+        from src.models.tensorflow_model import TensorFlowAQIModel
+
         logger.info(
             f"Training TensorFlow DNN (epochs={epochs}, batch={batch_size}, "
             f"lr={learning_rate}, patience={patience})..."

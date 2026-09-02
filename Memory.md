@@ -37,6 +37,11 @@
 | **Phase 8** | Train Ridge Regression & Naive Baseline | **Completed** ✅ | 2026-08-31 |
 | **Phase 9** | Train Random Forest Regressor | **Completed** ✅ | 2026-08-31 |
 | **Phase 10**| Train TensorFlow Neural Network | **Completed** ✅ | 2026-09-02 |
+| **Phase 10.5A**| Diagnostics & Distribution Shift | **Completed** ✅ | 2026-09-02 |
+| **Phase 10.5B**| Weather Ingestion & Enrichment | *In Progress* ⏳ | - |
+| **Phase 10.5C**| Systematic Tuning & Experiment Registry | Pending | - |
+| **Phase 10.5D**| Forecasting Architecture Experiments | Pending | - |
+| **Phase 10.5E**| Final Untouched Test Benchmark | Pending | - |
 | **Phase 11**| Model Evaluation & Walk-Forward Validation | Pending | - |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
 | **Phase 13**| Build Flask REST API | Pending | - |
@@ -113,4 +118,20 @@
 - Updated [`data/models/model_comparison.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/model_comparison.json) with 4-way benchmark.
 - Created analysis notebook [`notebooks/08_model_training_tf.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/08_model_training_tf.ipynb).
 - Built unit test suite [`tests/test_tensorflow_model.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_tensorflow_model.py) (7 tests).
-- **Total project: 127/127 tests passing, 91% coverage.**
+
+### Phase 10.5A: Diagnostics & Distribution Shift Analysis
+- Built [`src/training_pipeline/diagnostics.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/diagnostics.py) (97% test coverage):
+  - Train vs. Test distribution shift quantification:
+    - Train (2020–2025): Mean AQI = **257.1** (30.9% Hazardous, 22.6% Very Unhealthy).
+    - Test (2025–2026): Mean AQI = **169.6** (only 11.9% Hazardous, 26.6% Moderate) — **87.5 AQI points cleaner on average**.
+  - Seasonal Error Breakdown on Out-of-Time Test Set:
+    - **Winter Smog (Nov-Feb)**: Ridge beats Naive (**87.78 vs 93.04**; h+1: **47.57 vs 57.45**).
+    - **Spring/Summer (Mar-Jun)**: Ridge beats Naive (**84.49 vs 88.25**; h+1: **62.71 vs 80.41**).
+    - **Monsoon (Jul-Aug)**: Ridge beats Naive (**68.09 vs 74.91**; h+1: **48.99 vs 62.98**).
+  - AQI Severity Breakdown:
+    - **Hazardous AQI (>300)**: Ridge massively outperforms Naive with Overall RMSE **90.64 vs 164.41** (**+44.9% error reduction / 73.8 AQI points improvement**).
+- Generated report artifact [`data/processed/diagnostic_report.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/processed/diagnostic_report.json).
+- Created analysis notebook [`notebooks/09_error_and_distribution_diagnostics.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/09_error_and_distribution_diagnostics.ipynb).
+- Built test suite [`tests/test_diagnostics.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_diagnostics.py).
+- **Total project: 128/128 tests passing, 91% coverage.**
+
