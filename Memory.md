@@ -52,7 +52,7 @@
 | **Phase 11**| Multi-Year Walk-Forward Cross-Validation | **Completed** ✅ | 2026-09-06 |
 | **Phase 11.5**| Targeted Winter/Smog Feature Investigation | **Completed** ✅ | 2026-09-06 |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | **Completed** ✅ | 2026-09-06 |
-| **Phase 13**| Build Flask REST API | Pending | - |
+| **Phase 13**| Build Flask REST API | **Completed** ✅ | 2026-09-06 |
 | **Phase 14**| Build Streamlit UI Dashboard | Pending | - |
 | **Phase 15**| Automate with GitHub Actions CI/CD | Pending | - |
 | **Phase 16**| Hopsworks Cloud Feature Store Integration | Pending | - |
@@ -139,6 +139,17 @@
   - [`tests/test_prediction_cache.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_prediction_cache.py) (5 tests)
   - [`tests/test_predictor.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_predictor.py) (7 tests, including strict column order validation)
 - **Total test suite**: **260/260 tests passing (74% total codebase coverage, 88–100% on inference modules)**.
+
+### Phase 13: Flask REST API
+- Built [`src/api/routes.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/api/routes.py): Flask Blueprint implementing endpoints:
+  - `GET /api/health`: Service liveness and model readiness (returns 200 if healthy, 503 if degraded).
+  - `GET /api/current`: Returns latest observed telemetry, pollutant breakdown, weather, and EPA category/color without model inference.
+  - `GET /api/forecast`: Generates 72-hour forecast vectors with strict boolean query parsing (`force_refresh`), empirical error intervals, extreme alerts, and root-level freshness metadata (`data_status`, `input_observed_at`, `forecast_origin`, `generated_at`, `input_age_hours`, `is_stale`).
+  - `GET /api/model/info`: Returns model provenance, architecture (EXP-019), canonical 114-feature schema, and Phase 10.5E benchmark metrics.
+- Built [`src/api/app.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/api/app.py): Application factory `create_app()` with configurable CORS origins for Streamlit, standardized JSON error handlers (400, 404, 503, 500), and internal error protection (tracebacks and filesystem paths logged server-side only, never leaked in HTTP 500 responses).
+- Built [`tests/test_api.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_api.py): 18 comprehensive integration and unit tests covering health status degradation, observation retrieval without inference, forecast contract validation, timestamp semantics, boolean query parsing, CORS headers, and error masking.
+- **Total test suite**: **284/284 tests passing (75% total codebase coverage, 83–86% on API modules)**.
+
 
 
 

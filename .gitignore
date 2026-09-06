@@ -20,6 +20,7 @@ data/processed/
 data/models/
 data/predictions/
 data/logs/
+data/cached_predictions.json
 
 ## Jupyter
 .ipynb_checkpoints/

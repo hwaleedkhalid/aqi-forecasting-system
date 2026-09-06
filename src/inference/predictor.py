@@ -62,7 +62,13 @@ class AQIPredictor:
         """
         start_time = time.perf_counter()
 
-        origin = forecast_origin or datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        observed_time = input_observed_at or forecast_origin or now
+        if observed_time.tzinfo is None:
+            observed_time = observed_time.replace(tzinfo=timezone.utc)
+
+        # Forecast origin is strictly the observation time!
+        origin = forecast_origin or observed_time
         if origin.tzinfo is None:
             origin = origin.replace(tzinfo=timezone.utc)
 
@@ -117,28 +123,26 @@ class AQIPredictor:
         summary = self.post_processor.build_summary(forecasts)
 
         # 5. Freshness & Staleness Metadata
-        now = datetime.now(timezone.utc)
-        observed_time = input_observed_at or origin
-        if observed_time.tzinfo is None:
-            observed_time = observed_time.replace(tzinfo=timezone.utc)
-
         input_age_hours = round(max(0.0, (now - observed_time).total_seconds() / 3600.0), 2)
         is_stale = bool(input_age_hours > 3.0)
+        data_status = "stale" if is_stale else "live"
 
         curr_cat, curr_color = self.post_processor.process_horizon_point(
             0, origin, curr_aqi_val
         )["category"], self.post_processor.process_horizon_point(0, origin, curr_aqi_val)["color"]
 
         return {
-            "forecast_origin": origin.isoformat(),
+            "data_status": data_status,
             "input_observed_at": observed_time.isoformat(),
+            "forecast_origin": origin.isoformat(),
+            "generated_at": now.isoformat(),
             "input_age_hours": input_age_hours,
             "is_stale": is_stale,
             "model_id": "EXP-019",
             "model_version": "1.0-production",
             "feature_schema_version": "v2_weather_enriched",
             "feature_count": len(expected_schema),
-            "latency_ms": elapsed_ms,
+            "inference_latency_ms": elapsed_ms,
             "current_aqi": round(curr_aqi_val, 1),
             "current_category": curr_cat,
             "current_color": curr_color,
@@ -156,7 +160,7 @@ class AQIPredictor:
 
         Args:
             use_cache: Whether to return cached predictions if valid (default: True).
-            force_refresh: Whether to bypass cache and recompute (default: False).
+            force_refresh: Whether to bypass cache and recompute from latest stored features (default: False).
             dataset_path: Path to features CSV (default: data/processed/features_v2_weather.csv).
 
         Returns:
@@ -194,7 +198,7 @@ class AQIPredictor:
         result = self.predict_72h(
             features=df_features,
             current_aqi=current_aqi,
-            forecast_origin=datetime.now(timezone.utc),
+            forecast_origin=input_observed_at,
             input_observed_at=input_observed_at,
         )
 
@@ -202,6 +206,66 @@ class AQIPredictor:
             self.cache.set(cache_key, result)
 
         return result
+
+    def get_latest_observation(
+        self,
+        dataset_path: Path | str | None = None,
+    ) -> dict[str, Any]:
+        """Read and categorize the latest telemetry observation without model inference.
+
+        Args:
+            dataset_path: Path to features CSV (default: data/processed/features_v2_weather.csv).
+
+        Returns:
+            Dictionary containing latest observation values, EPA category, and freshness metadata.
+        """
+        path = Path(dataset_path or PROCESSED_DATA_DIR / "features_v2_weather.csv")
+        if not path.exists():
+            raise FileNotFoundError(f"Feature dataset not found at {path}")
+
+        df_latest = pd.read_csv(path).tail(1).copy()
+        if df_latest.empty:
+            raise ValidationError(f"No records found in {path}")
+
+        now = datetime.now(timezone.utc)
+        observed_time = now
+        if "datetime_utc" in df_latest.columns:
+            ts_val = pd.to_datetime(df_latest["datetime_utc"].iloc[0], utc=True)
+            observed_time = ts_val.to_pydatetime()
+
+        input_age_hours = round(max(0.0, (now - observed_time).total_seconds() / 3600.0), 2)
+        is_stale = bool(input_age_hours > 3.0)
+        data_status = "stale" if is_stale else "live"
+
+        current_aqi = float(df_latest["epa_aqi"].iloc[0]) if "epa_aqi" in df_latest.columns else 0.0
+        dominant = str(df_latest["dominant_pollutant"].iloc[0]) if "dominant_pollutant" in df_latest.columns else "pm2_5"
+
+        point = self.post_processor.process_horizon_point(0, observed_time, current_aqi)
+
+        pollutants = {}
+        for pol in ["pm2_5", "pm10", "o3", "no2", "so2", "co"]:
+            if pol in df_latest.columns:
+                pollutants[pol] = round(float(df_latest[pol].iloc[0]), 2)
+
+        weather = {}
+        for w_col in ["temperature_2m", "relative_humidity_2m", "wind_speed_10m", "surface_pressure"]:
+            if w_col in df_latest.columns:
+                weather[w_col] = round(float(df_latest[w_col].iloc[0]), 2)
+
+        return {
+            "data_status": data_status,
+            "input_observed_at": observed_time.isoformat(),
+            "retrieved_at": now.isoformat(),
+            "input_age_hours": input_age_hours,
+            "is_stale": is_stale,
+            "current_aqi": round(current_aqi, 1),
+            "dominant_pollutant": dominant,
+            "category": point["category"],
+            "color": point["color"],
+            "health_advisory": point["health_advisory"],
+            "pollutants": pollutants,
+            "weather": weather,
+        }
 
     def get_model_metadata(self) -> dict[str, Any]:
         """Return production model provenance, architecture specification, and benchmark metrics."""

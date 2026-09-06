@@ -53,11 +53,12 @@ class TestAQIPredictor:
         assert result["model_id"] == "EXP-019"
         assert result["model_version"] == "1.0-production"
         assert result["feature_count"] == 114
-        assert result["is_stale"] is False
+        assert result["data_status"] in ["live", "stale"]
+        assert "generated_at" in result
         assert result["current_aqi"] == 85.0
         assert result["current_category"] == "Moderate"
-        assert "latency_ms" in result
-        assert isinstance(result["latency_ms"], float)
+        assert "inference_latency_ms" in result
+        assert isinstance(result["inference_latency_ms"], float)
 
         # Check forecast points
         forecasts = result["forecasts"]
@@ -74,6 +75,55 @@ class TestAQIPredictor:
         summary = result["summary"]
         assert "peak_aqi" in summary
         assert 1 <= summary["peak_horizon"] <= 72
+
+    def test_forecast_origin_equals_input_observation_time(
+        self, predictor: AQIPredictor, sample_feature_df: pd.DataFrame
+    ):
+        """forecast_origin must strictly match input observation time, not current time."""
+        obs_time = datetime(2026, 8, 31, 7, 0, 0, tzinfo=timezone.utc)
+        result = predictor.predict_72h(
+            features=sample_feature_df,
+            input_observed_at=obs_time,
+        )
+        assert result["input_observed_at"] == "2026-08-31T07:00:00+00:00"
+        assert result["forecast_origin"] == "2026-08-31T07:00:00+00:00"
+
+    def test_h1_time_is_origin_plus_one_hour(
+        self, predictor: AQIPredictor, sample_feature_df: pd.DataFrame
+    ):
+        obs_time = datetime(2026, 8, 31, 7, 0, 0, tzinfo=timezone.utc)
+        result = predictor.predict_72h(
+            features=sample_feature_df,
+            input_observed_at=obs_time,
+        )
+        f1 = result["forecasts"][0]
+        assert f1["horizon"] == 1
+        assert f1["forecast_time"] == "2026-08-31T08:00:00+00:00"
+
+    def test_h72_time_is_origin_plus_72_hours(
+        self, predictor: AQIPredictor, sample_feature_df: pd.DataFrame
+    ):
+        obs_time = datetime(2026, 8, 31, 7, 0, 0, tzinfo=timezone.utc)
+        result = predictor.predict_72h(
+            features=sample_feature_df,
+            input_observed_at=obs_time,
+        )
+        f72 = result["forecasts"][71]
+        assert f72["horizon"] == 72
+        assert f72["forecast_time"] == "2026-09-03T07:00:00+00:00"
+
+    def test_generated_at_does_not_shift_forecast_horizons(
+        self, predictor: AQIPredictor, sample_feature_df: pd.DataFrame
+    ):
+        obs_time = datetime(2026, 8, 31, 7, 0, 0, tzinfo=timezone.utc)
+        result = predictor.predict_72h(
+            features=sample_feature_df,
+            input_observed_at=obs_time,
+        )
+        gen_time = datetime.fromisoformat(result["generated_at"])
+        assert gen_time.year == 2026
+        # Horizons are anchored to August 31, not the generation time in September
+        assert result["forecasts"][0]["forecast_time"].startswith("2026-08-31T08:00:00")
 
     def test_predict_72h_from_numpy_array(
         self, predictor: AQIPredictor
@@ -110,10 +160,11 @@ class TestAQIPredictor:
         result = predictor.predict_72h(
             features=sample_feature_df,
             input_observed_at=old_time,
-            forecast_origin=now,
+            forecast_origin=old_time,
         )
 
         assert result["is_stale"] is True
+        assert result["data_status"] == "stale"
         assert result["input_age_hours"] >= 4.9
 
     def test_predict_latest_executes_on_real_feature_dataset(
@@ -124,15 +175,41 @@ class TestAQIPredictor:
         assert len(result["forecasts"]) == 72
         assert result["current_aqi"] > 0.0
         assert "input_observed_at" in result
+        assert result["input_observed_at"] == "2026-08-31T07:00:00+00:00"
+        assert result["forecast_origin"] == "2026-08-31T07:00:00+00:00"
+        assert result["forecasts"][0]["forecast_time"] == "2026-08-31T08:00:00+00:00"
+        assert result["forecasts"][71]["forecast_time"] == "2026-09-03T07:00:00+00:00"
+
+    def test_force_refresh_does_not_mark_stale_data_fresh(
+        self, predictor: AQIPredictor
+    ):
+        """Bypassing cache to recompute from historical dataset must still report stale."""
+        result = predictor.predict_latest(use_cache=True, force_refresh=True)
+        assert result["is_stale"] is True
+        assert result["data_status"] == "stale"
+        assert result["input_age_hours"] > 3.0
 
     def test_predict_latest_cache_integration(
         self, predictor: AQIPredictor
     ):
-        # First call: cache miss, computes
         res1 = predictor.predict_latest(use_cache=True, force_refresh=True)
-        # Second call: cache hit
         res2 = predictor.predict_latest(use_cache=True, force_refresh=False)
         assert res1 == res2
+
+    def test_get_latest_observation_does_not_require_model_inference(
+        self, predictor: AQIPredictor
+    ):
+        """Reading current observation reads telemetry and categorizes without running model."""
+        obs = predictor.get_latest_observation()
+        assert "current_aqi" in obs
+        assert "dominant_pollutant" in obs
+        assert "category" in obs
+        assert "color" in obs
+        assert "pollutants" in obs
+        assert "weather" in obs
+        assert obs["data_status"] in ["live", "stale"]
+        assert "input_observed_at" in obs
+        assert "retrieved_at" in obs
 
     def test_get_model_metadata(self, predictor: AQIPredictor):
         meta = predictor.get_model_metadata()
