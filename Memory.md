@@ -173,10 +173,10 @@
   - $h=1\dots6$: Pure LightGBM TreeExplainer (interventional perturbation, check_additivity=False)
   - $h=7\dots37$: Pure Ridge LinearExplainer with background mean adjustment
   - $h=38\dots72$: Blended Ridge + Persistence ($w_h \hat{y}^{\text{Ridge}} + (1-w_h) y_t$) scaling both base value and feature attributions ($w_h b_h + \sum w_h \phi_{i,h} + (1-w_h) y_t = \hat{y}_h$)
-  - Global importance aggregation: $I_i = \frac{1}{72} \sum_{h=1}^{72} \operatorname{mean}_n |\phi_{i,h,n}^{\text{final}}|$
-  - Scaled-space attribution in model $z$-space with dual raw/scaled API reporting.
+  - Global importance aggregation: $I_i = \frac{1}{72} \sum_{h=1}^{72} \operatorname{mean}_n |\phi_{i,h,n}^{\text{final}}|$ evaluated across a 500-sample seasonal stratified cohort with a 100-sample background reference distribution.
+  - Scaled-space attribution in model $z$-space with dual original-representation (`raw_value`) and normalized (`scaled_value`) API reporting.
   - Strict additivity validated against `explained_output_preclip` before post-processing non-negative bounds.
-- Built [`src/inference/build_explainability_artifacts.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/build_explainability_artifacts.py) and serialized `data/models/explainability/` artifacts (`shap_background.npy`, `global_shap_importance.json`, `explainer_manifest.json`).
+- Built [`src/inference/build_explainability_artifacts.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/build_explainability_artifacts.py) and serialized `data/models/explainability/` artifacts (`shap_background.npy` [100 samples], `global_shap_importance.json` [500-sample cohort], `explainer_manifest.json`).
 - Updated [`src/inference/predictor.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/predictor.py): Added `explain_latest()` and `get_global_explainability()`.
 - Updated [`src/api/routes.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/api/routes.py): Added `GET /api/explain` with integer validation (`horizon=1..72`, `top_k=1..114`) and root freshness metadata.
 - Updated [`src/dashboard/components.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/components.py) and [`src/dashboard/app.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/app.py): Added interactive horizon attribution Plotly bar chart, persistence component breakdown cards, and global importance table.
