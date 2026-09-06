@@ -1,107 +1,137 @@
-# 🌬️ Pearls AQI Predictor
+# Pearls AQI Predictor
 
-**3-Day Air Quality Index Forecasting System**
+Serverless 72-hour Air Quality Index forecasting system for Lahore, Pakistan (31.55°N, 74.34°E). The project predicts US EPA AQI (0-500 scale) for 72 continuous hourly horizons using data sourced from OpenWeather Air Pollution History API (Nov 2020 to present) and the Open-Meteo Historical Weather Archive. 
 
-An end-to-end serverless AQI forecasting system that predicts the Air Quality Index for the next 72 hours using machine learning.
+The production champion model is EXP-019 (Persistence-Aware Hybrid Model).
 
-## 🏗️ Architecture
+## Architecture
 
-```
-OpenWeather API → Feature Pipeline → Model Training → Inference → Flask API → Streamlit Dashboard
-```
+The system utilizes a 114 weather-enriched input feature set (pollutant concentrations, meteorology, temporal/lag/rolling aggregates) scaled via StandardScaler (fitted on training data only).
 
-**Key decisions:**
-- **Prediction target**: EPA AQI (0-500 scale), 72 hourly values per forecast
-- **Models**: Ridge Regression → Random Forest → TensorFlow (progressive complexity)
-- **Storage**: Local CSV (Phases 1-15) → Hopsworks Feature Store (Phase 16+)
-- **Automation**: GitHub Actions (hourly feature pipeline, daily retraining)
+The EXP-019 architecture operates across the 72-hour horizon as follows:
+* **h=1..6**: LightGBM Direct Multi-Output (6 independent gradient-boosted regressors)
+* **h=7..37**: Ridge Regression (alpha=1.0)
+* **h=38..72**: Smoothly blended Ridge + Persistence (blend weight decays from 1.0 to min_blend_weight over 35 horizons)
 
-## 📂 Project Structure
+## Key Results
 
-```
+Based on the final out-of-time test across 9,311 samples:
+* **EXP-019 Performance**: Overall RMSE = 75.91, MAE = 53.55, R² = 0.4858
+  * h+1 RMSE = 50.43
+  * h+72 RMSE = 77.43
+* **Benchmark**: Beats Naive Persistence (RMSE 85.35) by 11.06%.
+* **Walk-forward Validation**: 4/4 folds won vs Naive, with a mean relative gain of 24.5%.
+* **Test Coverage**: 346 tests passing, 75% code coverage.
+
+## Tech Stack
+
+* **Machine Learning**: scikit-learn (Ridge), LightGBM, TensorFlow (explored), SHAP 0.49.1
+* **Backend**: Flask REST API (5 endpoints)
+* **Frontend**: Streamlit + Plotly (interactive 72h forecast chart with empirical error bands)
+* **Orchestration**: GitHub Actions (CI, hourly feature ingestion, weekly candidate evaluation)
+* **Feature Store**: Hopsworks (Phase 16 integration)
+* **Language**: Python 3.10
+
+## REST API Endpoints
+
+The backend is built with Flask, served under the `/api` route:
+* `GET /api/health` — Service liveness and model readiness
+* `GET /api/current` — Latest observed telemetry without inference
+* `GET /api/forecast` — 72-hour AQI forecast with empirical error intervals (supports `force_refresh` parameter)
+* `GET /api/model/info` — Champion model specification and benchmark metrics
+* `GET /api/explain` — SHAP feature attributions and persistence decomposition (parameters: `horizon=1..72`, `top_k=1..50`)
+
+## Dashboard Features
+
+The Streamlit interactive dashboard includes:
+* Live/stale telemetry banner
+* 72-hour interactive forecast curve with shaded empirical error bands (10th-90th percentile walk-forward residuals)
+* EPA category color coding and severity threshold reference lines
+* Milestone cards (+1h, +12h, +24h, +48h, +72h)
+* Interactive SHAP attribution explorer (slider for horizon 1-72)
+* Sidebar with model specs and test benchmarks
+* Automatic API-to-local-inference fallback
+
+## Project Structure
+
+```text
 Pearls-AQI-Predictor/
 ├── data/
-│   ├── raw/                  # Raw API responses (JSON)
-│   │   ├── air_quality/      # Historical air pollution data
-│   │   └── weather/          # Weather data
-│   ├── processed/            # Engineered features (CSV)
-│   ├── models/               # Trained model artifacts
+│   ├── raw/                  # Raw API responses
+│   ├── processed/            # Engineered features & schema
+│   ├── models/               # Trained model artifacts & experiment registry
+│   │   ├── experiments/      # EXP-001 to EXP-019 records
+│   │   ├── walk_forward/     # Walk-forward reports & empirical error intervals
+│   │   │   └── ablation/     # Winter/smog ablation results
+│   │   └── explainability/   # SHAP background & global importance
 │   ├── predictions/          # Cached predictions
 │   └── logs/                 # Application logs
-├── notebooks/                # Jupyter notebooks (EDA, training, evaluation)
+├── notebooks/                # 15 Jupyter notebooks (EDA through ablation)
 ├── src/
 │   ├── config.py             # Centralized configuration
-│   ├── logger.py             # Logging setup
-│   ├── exceptions.py         # Custom exception classes
-│   ├── data_ingestion/       # API clients (OpenWeather, AQICN)
-│   ├── feature_pipeline/     # Feature engineering & storage
-│   ├── training_pipeline/    # Dataset creation & model training
-│   ├── inference/            # Prediction & post-processing
-│   ├── models/               # ML model wrappers
+│   ├── exceptions.py         # Domain exception hierarchy
+│   ├── logger.py             # Structured logging
+│   ├── data_ingestion/       # OpenWeather & Open-Meteo API clients
+│   ├── feature_pipeline/     # Feature engineering, AQI calculation, Hopsworks
+│   ├── training_pipeline/    # Dataset builder, evaluator, walk-forward validator
+│   ├── models/               # 11 model classes (Naive through Hybrid)
+│   ├── inference/            # Predictor, explainer, post-processing, caching
 │   ├── api/                  # Flask REST API
 │   └── dashboard/            # Streamlit frontend
-├── tests/                    # pytest test suite
-├── .github/workflows/        # GitHub Actions CI/CD
-├── requirements.txt          # Python dependencies
-├── .env.example              # Environment variable template
+├── tests/                    # 27 test modules + conftest (346 tests)
+├── .github/workflows/        # CI, hourly ingestion, weekly evaluation
+├── requirements.txt
+├── .env.example
 └── .gitignore
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
-### 1. Clone and set up environment
+1. Clone the repository and create a virtual environment (Python 3.10):
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Configure environment variables:
+   Copy `.env.example` to `.env` and add your `OPENWEATHER_API_KEY`.
+4. Run the test suite:
+   ```bash
+   pytest tests/ -v --cov=src
+   ```
+5. Start the REST API:
+   ```bash
+   python -m flask --app src.api.app run
+   ```
+6. Start the dashboard (in a new terminal):
+   ```bash
+   streamlit run src/dashboard/app.py
+   ```
 
-```bash
-git clone <repo-url>
-cd Pearls-AQI-Predictor
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS/Linux
-pip install -r requirements.txt
-```
-
-### 2. Configure environment variables
-
-```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-### 3. Run tests
-
-```bash
-pytest tests/ -v --cov=src
-```
-
-## 🔑 Environment Variables
+## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENWEATHER_API_KEY` | Yes | OpenWeather API key ([get one free](https://openweathermap.org/api)) |
-| `HOPSWORKS_API_KEY` | Phase 16+ | Hopsworks API key |
+| `OPENWEATHER_API_KEY` | Yes | OpenWeather API key |
+| `HOPSWORKS_API_KEY` | For cloud integration | Hopsworks Feature Store API key |
+| `HOPSWORKS_PROJECT_NAME` | For cloud integration | Hopsworks project name |
+| `CORS_ORIGINS` | No | Comma-separated origins for Flask CORS (default: localhost:8501) |
 | `TARGET_CITY_NAME` | No | City name (default: Lahore) |
 | `TARGET_LAT` | No | Latitude (default: 31.5497) |
 | `TARGET_LON` | No | Longitude (default: 74.3436) |
 | `LOG_LEVEL` | No | Logging level (default: INFO) |
 
-## 📊 Technology Stack
+## GitHub Actions Workflows
 
-| Component | Technology |
-|-----------|-----------|
-| Data Source | OpenWeather API (Phase 1), AQICN (Phase 18) |
-| Feature Store | Local CSV → Hopsworks |
-| ML Models | Ridge, Random Forest, TensorFlow |
-| Backend API | Flask |
-| Dashboard | Streamlit + Plotly |
-| Orchestration | GitHub Actions |
-| Explainability | SHAP (Phase 17) |
+* `ci.yml`: Runs full test suite on push/PR to main (Python 3.10, ubuntu-latest, pytest with 70% coverage gate).
+* `feature_pipeline.yml`: Runs hourly at `:17` — executes data ingestion and uploads telemetry snapshot artifact (7-day retention).
+* `training_pipeline.yml`: Runs weekly on Sundays at 02:23 UTC — evaluates candidate models and enforces production model immutability via SHA256 hash comparison.
 
-## 📋 Implementation Phases
+## Additional Documentation
 
-See [Phases.md](../Phases.md) for the full 18-phase implementation plan.
+Please refer to `report.md` for a detailed academic report that covers the development journey, extensive experiment results, and technical design decisions.
 
-Current status: **Phase 1 — Project Setup & Configuration** ✅
-
-## 📝 License
-
-This project is for educational and research purposes.
+**License**: This project is for educational and research purposes.
