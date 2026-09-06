@@ -267,7 +267,8 @@ class TestDashboardComponents:
             patch("streamlit.set_page_config"),
             patch("streamlit.title"),
             patch("streamlit.caption"),
-            patch("streamlit.columns", return_value=[MagicMock(), MagicMock()]),
+            patch("streamlit.columns", side_effect=lambda n: [MagicMock()]*n if isinstance(n, int) else [MagicMock()]*len(n)),
+            patch("streamlit.slider", return_value=24),
             patch("streamlit.button", return_value=False),
             patch("streamlit.spinner"),
             patch("streamlit.markdown"),
@@ -278,6 +279,7 @@ class TestDashboardComponents:
             patch("src.dashboard.app.render_current_observation_card"),
             patch("src.dashboard.app.render_horizon_milestones"),
             patch("src.dashboard.app.render_telemetry_breakdown"),
+            patch("src.dashboard.app.render_explainability_section"),
             patch("src.dashboard.app.render_sidebar"),
         ):
             main()
@@ -290,7 +292,7 @@ class TestDashboardComponents:
             patch("streamlit.set_page_config"),
             patch("streamlit.title"),
             patch("streamlit.caption"),
-            patch("streamlit.columns", return_value=[MagicMock(), MagicMock()]),
+            patch("streamlit.columns", side_effect=lambda n: [MagicMock()]*n if isinstance(n, int) else [MagicMock()]*len(n)),
             patch("streamlit.button", return_value=False),
             patch("src.dashboard.data_client.DashboardDataClient.fetch_current", side_effect=RuntimeError("Data failure")),
             patch("streamlit.error") as mock_err,

@@ -115,3 +115,30 @@ class DashboardDataClient:
         # Fallback to direct local metadata
         data = self.predictor.get_model_metadata()
         return data, "Direct Local Inference (API Offline Fallback)"
+
+    def fetch_explain(self, horizon: int = 24, top_k: int = 10) -> tuple[dict[str, Any], str]:
+        """Fetch SHAP explanation and feature attribution for a specific horizon.
+
+        Args:
+            horizon: Target prediction horizon (1..72).
+            top_k: Number of top features to return.
+
+        Returns:
+            Tuple of (explanation_dict, source_mode_string).
+        """
+        try:
+            resp = requests.get(
+                f"{self.api_base_url}/explain",
+                params={"horizon": str(horizon), "top_k": str(top_k)},
+                timeout=self.timeout * 3,
+            )
+            if resp.status_code == 200:
+                return resp.json(), "REST API"
+            logger.warning(f"API /explain returned HTTP {resp.status_code}, activating fallback.")
+        except Exception as e:
+            logger.debug(f"API connection failed for /explain ({e}), activating direct fallback.")
+
+        # Fallback to direct local explainer
+        data = self.predictor.explain_latest(horizon=horizon, top_k=top_k)
+        return data, "Direct Local Inference (API Offline Fallback)"
+

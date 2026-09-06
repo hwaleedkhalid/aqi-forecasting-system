@@ -21,6 +21,7 @@ import streamlit as st
 from src.dashboard.components import (
     build_forecast_figure,
     render_current_observation_card,
+    render_explainability_section,
     render_freshness_banner,
     render_metadata_header,
     render_sidebar,
@@ -135,10 +136,25 @@ def main() -> None:
 
     st.markdown("---")
 
-    # 6. Detailed Telemetry Observations Breakdown
+    # 6. Model Explainability & Feature Attribution Section
+    selected_horizon = st.slider(
+        "Select Forecast Horizon for Feature Attribution:",
+        min_value=1,
+        max_value=72,
+        value=24,
+        step=1,
+        help="Inspect SHAP feature attribution and persistence decomposition for any hourly horizon.",
+    )
+    with st.spinner(f"Computing SHAP attribution for horizon +{selected_horizon}h..."):
+        explain_data, _ = client.fetch_explain(horizon=selected_horizon, top_k=10)
+    render_explainability_section(explain_data)
+
+    st.markdown("---")
+
+    # 7. Detailed Telemetry Observations Breakdown
     render_telemetry_breakdown(obs_data)
 
-    # 7. Sidebar Provenance & Summary
+    # 8. Sidebar Provenance & Summary
     summary = forecast_data.get("summary", {})
     render_sidebar(model_info, summary, forecast_source)
 

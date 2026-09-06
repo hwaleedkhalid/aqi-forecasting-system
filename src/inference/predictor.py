@@ -6,7 +6,8 @@ post-processing enrichment, and cache coordination for 72-hour AQI forecasts.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import time
 from typing import Any
@@ -16,10 +17,11 @@ import pandas as pd
 
 from src.config import PROCESSED_DATA_DIR
 from src.exceptions import ValidationError
-from src.logger import logger
 from src.inference.cache import PredictionCache
+from src.inference.explainer import EXPLAINABILITY_DIR, ModelExplainer
 from src.inference.model_loader import ModelLoader
 from src.inference.post_processing import AQIPostProcessor
+from src.logger import logger
 
 
 class AQIPredictor:
@@ -295,3 +297,75 @@ class AQIPredictor:
             },
             "status": "validated_production_champion",
         }
+
+    def get_global_explainability(self) -> dict[str, Any]:
+        """Return precomputed global feature importance rankings and manifest."""
+        global_path = EXPLAINABILITY_DIR / "global_shap_importance.json"
+        if not global_path.exists():
+            from src.inference.build_explainability_artifacts import build_artifacts
+            build_artifacts()
+
+        with open(global_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def explain_latest(
+        self,
+        horizon: int = 24,
+        top_k: int = 10,
+        dataset_path: Path | str | None = None,
+    ) -> dict[str, Any]:
+        """Generate SHAP feature attribution and persistence decomposition for the latest observation.
+
+        Args:
+            horizon: Target horizon index (1..72).
+            top_k: Number of top features to return.
+            dataset_path: Optional path to features dataset.
+
+        Returns:
+            Dictionary matching authoritative explanation contract.
+        """
+        # 1. Resolve current observation and exact current_aqi
+        latest_obs = self.get_latest_observation(dataset_path=dataset_path)
+        current_aqi_val = float(latest_obs["current_aqi"])
+
+        path = Path(dataset_path or PROCESSED_DATA_DIR / "features_v2_weather.csv")
+        df_latest = pd.read_csv(path).tail(1).copy()
+        schema = self.model_loader.load_schema()
+        raw_vec = df_latest[schema].values
+
+        # 2. Initialize explainer with loaded production model and scaler
+        model = self.model_loader.load_model()
+        scaler = self.model_loader.load_scaler()
+        explainer = ModelExplainer(model=model, scaler=scaler, feature_names=schema)
+
+        # 3. Compute explanation passing the exact resolved current_aqi
+        explanation = explainer.explain_horizon(
+            raw_feature_vector=raw_vec,
+            horizon=horizon,
+            top_k=top_k,
+            current_aqi=current_aqi_val,
+        )
+
+        # 4. Attach timeline provenance and freshness metadata matching /api/forecast
+        obs_time = datetime.fromisoformat(latest_obs["input_observed_at"])
+        target_time = obs_time + timedelta(hours=horizon)
+        now = datetime.now(timezone.utc)
+
+        global_info = self.get_global_explainability()
+
+        return {
+            "model_id": "EXP-019",
+            "model_version": "1.0-production",
+            "horizon": horizon,
+            "data_status": latest_obs["data_status"],
+            "input_observed_at": latest_obs["input_observed_at"],
+            "forecast_origin": latest_obs["input_observed_at"],
+            "target_time": target_time.isoformat(),
+            "generated_at": now.isoformat(),
+            "input_age_hours": latest_obs["input_age_hours"],
+            "is_stale": latest_obs["is_stale"],
+            **explanation,
+            "global_persistence_mean_contribution": global_info.get("global_persistence_mean_contribution", 0.0),
+            "global_top_features": global_info.get("overall_feature_importance", [])[:top_k],
+        }
+

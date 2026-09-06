@@ -8,6 +8,7 @@ and empirical error interval visualizations.
 from __future__ import annotations
 
 from typing import Any
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -255,3 +256,113 @@ def render_sidebar(model_info: dict[str, Any], summary: dict[str, Any], source_m
             st.sidebar.warning("⚠️ Alert: High Severity AQI (>200) predicted within 72h.")
         else:
             st.sidebar.success("No extreme AQI (>200) predicted in 72h window.")
+
+
+def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon: int) -> go.Figure:
+    """Build horizontal bar chart for top SHAP feature attributions at a specific horizon.
+
+    Args:
+        top_features: List of feature attribution dictionaries.
+        horizon: Forecast horizon number.
+
+    Returns:
+        Configured Plotly Figure.
+    """
+    if not top_features:
+        return go.Figure()
+
+    # Invert so largest magnitude appears at top
+    features_rev = [f["feature"] for f in reversed(top_features)]
+    shaps_rev = [f["shap_value"] for f in reversed(top_features)]
+    raws_rev = [f["raw_value"] for f in reversed(top_features)]
+    scaleds_rev = [f["scaled_value"] for f in reversed(top_features)]
+    colors = ["#D32F2F" if v > 0 else "#388E3C" for v in shaps_rev]
+
+    custom_data = list(zip(raws_rev, scaleds_rev))
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            y=features_rev,
+            x=shaps_rev,
+            orientation="h",
+            marker=dict(color=colors),
+            customdata=custom_data,
+            hovertemplate=(
+                "<b>Feature:</b> %{y}<br>"
+                "<b>SHAP Attribution:</b> %{x:+.2f} AQI points<br>"
+                "<b>Raw Input Value:</b> %{customdata[0]:.2f}<br>"
+                "<b>Scaled Feature Value:</b> %{customdata[1]:.2f}<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        title=dict(
+            text=f"<b>Feature Attribution for Horizon +{horizon}h</b><br><sup>Top features moving model prediction relative to baseline reference</sup>",
+            x=0.01,
+            y=0.96,
+        ),
+        xaxis=dict(
+            title="SHAP Attribution (AQI contribution relative to reference)",
+            zeroline=True,
+            zerolinecolor="#333",
+            zerolinewidth=1.5,
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.06)",
+        ),
+        yaxis=dict(
+            title="",
+            automargin=True,
+        ),
+        margin=dict(l=10, r=20, t=60, b=40),
+        height=380,
+    )
+    return fig
+
+
+def render_explainability_section(explanation: dict[str, Any]) -> None:
+    """Render interactive model explainability and persistence decomposition section."""
+    st.subheader("Model Explainability & Feature Attribution")
+    st.caption("SHAP attributions and persistence blending decomposition for EXP-019 hybrid architecture.")
+
+    h = explanation.get("horizon", 24)
+    spec_type = explanation.get("specialist_type", "Specialist")
+    w = explanation.get("blend_weight", 1.0)
+    raw_spec = explanation.get("raw_specialist_output", 0.0)
+    m_comp = explanation.get("model_component", 0.0)
+    p_comp = explanation.get("persistence_component", 0.0)
+    preclip = explanation.get("explained_output_preclip", 0.0)
+    pred_aqi = explanation.get("predicted_aqi", 0.0)
+    base_val = explanation.get("base_value", 0.0)
+    err = explanation.get("additivity_error", 0.0)
+
+    # 1. Decomposition Metric Cards
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        st.metric("Specialist Sub-Model", spec_type)
+    with c2:
+        st.metric("Blend Weight (w)", f"{w:.2f}")
+    with c3:
+        st.metric("Model Component", f"{m_comp:.1f}")
+    with c4:
+        st.metric("Persistence Term", f"{p_comp:.1f}")
+    with c5:
+        st.metric("Pre-Clip Output", f"{preclip:.1f}", delta=f"Final AQI: {pred_aqi:.1f}")
+
+    # 2. Plotly Waterfall / Attribution Chart
+    top_features = explanation.get("top_features", [])
+    if top_features:
+        fig = build_feature_attribution_figure(top_features, h)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # 3. Global Top Features & Persistence Table
+    with st.expander("📊 Global Multi-Horizon Feature Importance (500-Sample Stratified Cohort)"):
+        p_mean = explanation.get("global_persistence_mean_contribution", 0.0)
+        st.markdown(f"**Mean Absolute Persistence Contribution across 72h:** `{p_mean:.2f} AQI points`")
+
+        global_feats = explanation.get("global_top_features", [])
+        if global_feats:
+            df_global = pd.DataFrame(global_feats)
+            st.dataframe(df_global, use_container_width=True, hide_index=True)
+

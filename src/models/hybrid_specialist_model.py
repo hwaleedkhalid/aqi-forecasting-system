@@ -209,5 +209,6 @@ class PersistenceAwareHybridModel(BaseAQIModel):
         self.m_rest = data["m_rest"]
         self.min_blend_weight = data["min_blend_weight"]
         self.current_aqi_col_idx = data["current_aqi_col_idx"]
+        self.blend_weights = np.linspace(1.0, self.min_blend_weight, 35)
         self.is_fitted = True
         return self

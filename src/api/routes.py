@@ -147,3 +147,46 @@ def get_model_info() -> Any:
     except Exception as e:
         logger.error(f"Error retrieving model metadata: {e}")
         raise ServiceUnavailable("Model metadata is currently unavailable.") from e
+
+
+@api_bp.route("/explain", methods=["GET"])
+def get_model_explanation() -> Any:
+    """Compute and return SHAP feature attribution and persistence decomposition for a forecast horizon.
+
+    Query parameters:
+        horizon (int, optional): Prediction horizon to explain (1..72, default: 24).
+        top_k (int, optional): Number of top features to return (1..50, default: 10).
+
+    Returns:
+        200 OK JSON containing horizon feature attributions, persistence decomposition,
+        and global feature importance rankings.
+    """
+    horizon_raw = request.args.get("horizon", "24")
+    top_k_raw = request.args.get("top_k", "10")
+
+    try:
+        horizon = int(horizon_raw)
+        if not (1 <= horizon <= 72):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise BadRequest(f"Invalid 'horizon' parameter '{horizon_raw}': must be an integer between 1 and 72.")
+
+    try:
+        top_k = int(top_k_raw)
+        if not (1 <= top_k <= 50):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise BadRequest(f"Invalid 'top_k' parameter '{top_k_raw}': must be an integer between 1 and 50.")
+
+    try:
+        predictor = get_predictor()
+        explanation = predictor.explain_latest(horizon=horizon, top_k=top_k)
+        return jsonify(explanation), 200
+    except FileNotFoundError as e:
+        raise ServiceUnavailable("Feature dataset or model artifacts are unavailable for explainability.") from e
+    except ValidationError as e:
+        raise BadRequest(str(e)) from e
+    except Exception as e:
+        logger.error(f"Error generating SHAP explanation: {e}", exc_info=True)
+        raise ServiceUnavailable("Failed to generate model explanation.") from e
+

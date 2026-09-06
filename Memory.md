@@ -53,10 +53,10 @@
 | **Phase 11.5**| Targeted Winter/Smog Feature Investigation | **Completed** ✅ | 2026-09-06 |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | **Completed** ✅ | 2026-09-06 |
 | **Phase 13**| Build Flask REST API | **Completed** ✅ | 2026-09-06 |
-| **Phase 14**| Build Streamlit UI Dashboard | Pending | - |
-| **Phase 15**| Automate with GitHub Actions CI/CD | Pending | - |
-| **Phase 16**| Hopsworks Cloud Feature Store Integration | Pending | - |
-| **Phase 17**| SHAP Model Explainability | Pending | - |
+| **Phase 14**| Build Streamlit UI Dashboard | **Completed** ✅ | 2026-09-06 |
+| **Phase 15**| Automate with GitHub Actions CI/CD | **Completed** ✅ | 2026-09-06 |
+| **Phase 16**| Hopsworks Cloud Feature Store Integration | **Completed** ✅ | 2026-09-06 |
+| **Phase 17**| SHAP Model Explainability | **Completed** ✅ | 2026-09-06 |
 | **Phase 18**| AQICN Multi-source Data Integration | Future | - |
 
 ---
@@ -150,6 +150,32 @@
 - Built [`tests/test_api.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_api.py): 18 comprehensive integration and unit tests covering health status degradation, observation retrieval without inference, forecast contract validation, timestamp semantics, boolean query parsing, CORS headers, and error masking.
 - **Total test suite**: **284/284 tests passing (75% total codebase coverage, 83–86% on API modules)**.
 
+### Phase 14: Streamlit UI Dashboard
+- Built [`src/dashboard/data_client.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/data_client.py): Unified client supporting Flask REST API mode with seamless Direct Local Inference fallback.
+- Built [`src/dashboard/components.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/components.py): Reusable UI components for freshness banner, telemetry breakdown, forecast curve with empirical error bands (Plotly), and sidebar.
+- Built [`src/dashboard/app.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/app.py): Streamlit dashboard with interactive horizon inspection, EPA color coding, and live/stale telemetry alerts.
+- Built [`tests/test_dashboard.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_dashboard.py): 16 comprehensive unit and contract parity tests.
 
+### Phase 15: GitHub Actions Automation & CI
+- Created [`.github/workflows/ci.yml`](file:///d:/10Perls/Pearls-AQI-Predictor/.github/workflows/ci.yml): Automated test suite execution on pull requests and pushes to main.
+- Created [`.github/workflows/feature_pipeline.yml`](file:///d:/10Perls/Pearls-AQI-Predictor/.github/workflows/feature_pipeline.yml): Hourly ingestion with artifact retention.
+- Created [`.github/workflows/training_pipeline.yml`](file:///d:/10Perls/Pearls-AQI-Predictor/.github/workflows/training_pipeline.yml): Weekly retraining and candidate evaluation with safety controls.
+- Built [`src/feature_pipeline/run_hourly_ingestion.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/run_hourly_ingestion.py) & [`src/training_pipeline/run_candidate_evaluation.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/run_candidate_evaluation.py).
+- Built [`tests/test_workflows.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_workflows.py): 10 workflow validation tests.
 
+### Phase 16: Hopsworks Cloud Feature Store Integration
+- Built [`src/feature_pipeline/hopsworks_integration.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/hopsworks_integration.py): 115-column cloud storage schema (`location_id` primary key, `dt` event time) with synchronous job waiting (`wait=True`) and strict 114-column inference projection.
+- Built [`src/inference/hopsworks_registry.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/hopsworks_registry.py): Model registry bundle packaging with `manifest.json` SHA256 integrity verification.
+- Built [`tests/test_hopsworks_integration.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_hopsworks_integration.py): 16 unit tests for cloud integration and offline fallbacks.
 
+### Phase 17: SHAP Model Explainability
+- Built [`src/inference/explainer.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/explainer.py): Authoritative `ModelExplainer` engine implementing exact hybrid persistence decomposition across all 72 horizons:
+  - $h=1\dots6$: Pure LightGBM TreeExplainer (interventional perturbation, check_additivity=False)
+  - $h=7\dots37$: Pure Ridge LinearExplainer with background mean adjustment
+  - $h=38\dots72$: Blended Ridge + Persistence ($w_h \hat{y}^{\text{Ridge}} + (1-w_h) y_t$) scaling both base value and feature attributions ($w_h b_h + \sum w_h \phi_{i,h} + (1-w_h) y_t = \hat{y}_h$)
+- Built [`src/inference/build_explainability_artifacts.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/build_explainability_artifacts.py) and serialized `data/models/explainability/` artifacts (`shap_background.npy`, `global_shap_importance.json`, `explainer_manifest.json`).
+- Updated [`src/inference/predictor.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/predictor.py): Added `explain_latest()` and `get_global_explainability()`.
+- Updated [`src/api/routes.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/api/routes.py): Added `GET /api/explain` with integer validation (`horizon=1..72`, `top_k=1..114`) and root freshness metadata.
+- Updated [`src/dashboard/components.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/components.py) and [`src/dashboard/app.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/app.py): Added interactive horizon attribution Plotly bar chart, persistence component breakdown cards, and global importance table.
+- Built [`tests/test_explainer.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_explainer.py): 20 comprehensive unit, mathematical additivity, routing boundary, and contract consistency tests.
+- **Total test suite**: **346/346 tests passing (75% total codebase coverage)**.
