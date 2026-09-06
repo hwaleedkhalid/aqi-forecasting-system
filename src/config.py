@@ -53,10 +53,18 @@ API_RETRY_BASE_DELAY: float = 1.0  # seconds, exponential backoff
 API_RATE_LIMIT_DELAY: float = 1.0  # seconds between batch requests
 
 # =============================================================================
-# Hopsworks Configuration (Phase 16+)
+# Hopsworks Configuration (Phase 16)
 # =============================================================================
 HOPSWORKS_API_KEY: str = os.getenv("HOPSWORKS_API_KEY", "")
-HOPSWORKS_PROJECT_NAME: str = os.getenv("HOPSWORKS_PROJECT_NAME", "pearls_aqi_predictor")
+HOPSWORKS_PROJECT: str = os.getenv("HOPSWORKS_PROJECT", os.getenv("HOPSWORKS_PROJECT_NAME", "pearls_aqi_predictor"))
+HOPSWORKS_HOST: str = os.getenv("HOPSWORKS_HOST", "c.app.hopsworks.ai")
+HOPSWORKS_FEATURE_GROUP_NAME: str = "aqi_weather_features_v2"
+HOPSWORKS_FEATURE_GROUP_VERSION: int = 1
+HOPSWORKS_FEATURE_VIEW_NAME: str = "aqi_forecast_view"
+HOPSWORKS_FEATURE_VIEW_VERSION: int = 1
+HOPSWORKS_MODEL_NAME: str = "pearls_aqi_production_champion"
+HOPSWORKS_MODEL_VERSION: int = 1
+HOPSWORKS_CANDIDATE_MODEL_NAME: str = "pearls_aqi_candidate_model"
 
 # =============================================================================
 # Feature Engineering

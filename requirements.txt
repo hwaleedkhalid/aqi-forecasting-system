@@ -11,7 +11,8 @@ shap>=0.42.0
 joblib>=1.3.0
 
 # Feature Store (Phase 16)
-hopsworks>=3.4.0
+hopsworks>=3.4.0,<4.0.0
+nest_asyncio>=1.6.0
 
 # Web Framework
 flask>=3.0.0
