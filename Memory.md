@@ -49,7 +49,7 @@
 | **Phase 10.5C**| Systematic Tuning & Experiment Registry | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5D**| Forecasting Architecture Experiments | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5E**| Final Untouched Test Benchmark | **Completed** ✅ | 2026-09-02 |
-| **Phase 11**| Multi-Year Walk-Forward Cross-Validation | *Ready to Start* ⏳ | - |
+| **Phase 11**| Multi-Year Walk-Forward Cross-Validation | **Completed** ✅ | 2026-09-06 |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
 | **Phase 13**| Build Flask REST API | Pending | - |
 | **Phase 14**| Build Streamlit UI Dashboard | Pending | - |
@@ -75,4 +75,32 @@
 - Saved production model artifact to [`data/models/production_hybrid_model.joblib`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/production_hybrid_model.joblib).
 - Generated analysis notebook [`notebooks/13_final_test_benchmark.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/13_final_test_benchmark.ipynb).
 - Generated benchmark JSON & CSV reports in `data/models/`.
-- **Total test suite**: **147/147 tests passing (77% total codebase coverage)**.
+
+### Phase 11: Walk-Forward Stability & Diagnostic Validation
+- Built [`src/training_pipeline/season_classifier.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/season_classifier.py): `LahoreSeasonClassifier` with documented month-to-season mapping as single authoritative source.
+- Built [`src/training_pipeline/walk_forward_validator.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/walk_forward_validator.py): modular `WalkForwardFoldEngine`, `FoldTrainer`, `DiagnosticEvaluator` (5 dimensions), `WalkForwardReportGenerator`.
+- Built [`src/training_pipeline/run_walk_forward.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/run_walk_forward.py): experiment runner executing 4 folds × 4 models = 16 evaluations.
+- Embargo invariant explicitly verified: `val_start > train_end + 72h` for all 4 folds (gap: 4 days 1 hour each).
+- All fold preprocessing (scaler + model) refit from scratch on each fold's training data only.
+- **Walk-Forward Stability Results (EXP-019 vs Naive)**:
+  - **4/4 folds**: EXP-019 outperforms Naive Persistence.
+  - **Mean RMSE delta: +27.0** (EXP-019 consistently better).
+  - **Worst fold advantage: +21.8 RMSE points** — EXP-019 never worse than Naive.
+  - **Relative gain: 24.5%** vs Naive (stronger than the 11% observed on final test set).
+  - **Fold std: 4.9** — consistent margin, not a regime-specific artifact.
+- **Walk-Forward Per-Fold Overall RMSE**:
+  | Fold | Season | EXP-019 | EXP-017 | Ridge v2 | Naive |
+  | :--- | :--- | :---: | :---: | :---: | :---: |
+  | F1 | Winter/Smog 2021 | 104.23 | 102.76 | 103.08 | 139.04 |
+  | F2 | Transition+Summer 2022 | 72.43 | 72.67 | 72.95 | 94.28 |
+  | F3 | Monsoon 2022 | 71.88 | 71.15 | 71.42 | 96.03 |
+  | F4 | Winter/Smog 2023 | **85.21** | 85.47 | 85.79 | 112.49 |
+- **Key diagnostic findings**:
+  1. EXP-019's persistence blend is most impactful in Winter/Smog (highest AQI variance regime).
+  2. Summer/Monsoon models generalize well (RMSE 71–72); Winter/Smog is the hardest regime.
+  3. R² across folds = 0.14–0.38. Remaining error points to need for winter-specific features (crop burning calendar, inversion layer indicators, more training history).
+  4. Distribution shift (Wasserstein) largest in Fold 1 (earliest winter with least training context).
+- **Reports**: `data/models/walk_forward/walk_forward_report.json`, `walk_forward_summary.csv`.
+- **Notebook**: [`notebooks/14_walk_forward_stability.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/14_walk_forward_stability.ipynb).
+- **Total test suite**: **190/190 tests passing (74% total codebase coverage)**.
+
