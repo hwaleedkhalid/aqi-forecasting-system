@@ -111,17 +111,18 @@
 - **Ablation Results Summary (Overall RMSE by Configuration)**:
   | Ablation ID | Description | F1 (Winter 21) | F2 (Trans/Sum) | F3 (Monsoon) | F4 (Winter 23) | Mean RMSE | Winter Mean Δ |
   | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-  | **ABL-000** | Baseline (113 features) | 104.23 | 72.43 | 71.88 | 85.21 | 83.44 | Baseline |
+  | **ABL-000** | Baseline (114 canonical / 113 physical) | 104.23 | 72.43 | 71.88 | 85.21 | 83.44 | Baseline |
   | **ABL-001** | + Family 1 (Inversion Proxy) | 104.38 | 72.29 | 71.81 | 85.20 | 83.42 | -0.064 |
   | **ABL-002** | + Family 2 (Fog/Mist Indicator)| 104.30 | 72.40 | 71.84 | 84.94 | 83.37 | +0.103 |
   | **ABL-003** | + Family 3 (Stagnation Enh.) | 104.24 | 72.78 | 72.24 | 85.37 | 83.66 | -0.084 |
   | **ABL-004** | + Family 4 (Seasonal Emission) | 103.86 | 72.40 | 71.75 | 85.31 | 83.33 | +0.139 |
   | **ABL-005** | + All 4 Families Combined | 104.28 | 72.55 | 72.00 | 85.16 | 83.50 | +0.005 |
+- **Schema Note (113 physical vs 114 canonical features)**: The production champion model EXP-019 is serialized with the canonical 114-feature schema (where feature index 4 is the numeric epoch timestamp `dt`, alongside 113 physical meteorological, pollutant, and temporal features). During dynamic fold evaluations in Phase 11/11.5, `dt` was excluded as metadata to focus validation strictly on the 113 physical predictors. Both refer to the identical physical feature space, and the production inference contract strictly operates on the canonical 114-feature vector.
 - **Key Scientific Findings**:
   1. **Limited Incremental Value from Surface Proxies**: Across all 6 configurations, mean RMSE ranges from 83.33 to 83.66 (full spread of 0.33 RMSE points). The maximum improvement over baseline is 0.11 RMSE points (83.44 → 83.33 with ABL-004), indicating surface meteorological features are near their predictive limit for this task.
   2. **Stagnation Redundancy**: Family 3 produced slight regressions in mean RMSE (83.44 → 83.66), supporting the hypothesis that the new stagnation features are largely redundant with existing features (`stagnation_index` and wind lags).
   3. **Plausible Information Gaps Beyond Surface Telemetry**: Surface proxies cannot represent vertical atmospheric profiles (PBL height, lapse rates aloft) or real-time emission dynamics (active fire counts). These remain plausible sources of additional information that the current surface-only feature set cannot represent.
-  4. **Decision: Outcome B (EXP-019 Retained as Champion)**: None of the tested feature families satisfied the predefined adoption criteria. The additional feature complexity is not justified by the observed walk-forward performance. EXP-019 remains the validated production champion.
+  4. **Decision: Outcome B (EXP-019 Retained as Champion)**: None of the tested feature families satisfied the predefined adoption criteria. The additional feature complexity is not justified by the observed walk-forward performance. EXP-019 with the canonical 114-feature schema remains the validated production champion.
 - **Reports**: `data/models/walk_forward/ablation/ablation_report.json`, `ablation_summary.csv`, `ablation_decision.json`.
 - **Notebook**: [`notebooks/15_winter_smog_ablation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/15_winter_smog_ablation.ipynb).
 - **Total test suite**: **233/233 tests passing (75% total codebase coverage)**.
