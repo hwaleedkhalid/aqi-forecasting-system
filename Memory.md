@@ -50,6 +50,7 @@
 | **Phase 10.5D**| Forecasting Architecture Experiments | **Completed** ✅ | 2026-09-02 |
 | **Phase 10.5E**| Final Untouched Test Benchmark | **Completed** ✅ | 2026-09-02 |
 | **Phase 11**| Multi-Year Walk-Forward Cross-Validation | **Completed** ✅ | 2026-09-06 |
+| **Phase 11.5**| Targeted Winter/Smog Feature Investigation | **Completed** ✅ | 2026-09-06 |
 | **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
 | **Phase 13**| Build Flask REST API | Pending | - |
 | **Phase 14**| Build Streamlit UI Dashboard | Pending | - |
@@ -102,5 +103,27 @@
   4. Distribution shift (Wasserstein) largest in Fold 1 (earliest winter with least training context).
 - **Reports**: `data/models/walk_forward/walk_forward_report.json`, `walk_forward_summary.csv`.
 - **Notebook**: [`notebooks/14_walk_forward_stability.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/14_walk_forward_stability.ipynb).
-- **Total test suite**: **190/190 tests passing (74% total codebase coverage)**.
+
+### Phase 11.5: Targeted Winter/Smog Feature Investigation
+- Built [`src/feature_pipeline/winter_smog_features.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/feature_pipeline/winter_smog_features.py): 4 candidate feature families (Thermal Inversion Proxy, Fog/Mist Indicator, Stagnation Enhancement, Seasonal Emission Proxy), all backward-looking, no external API dependencies.
+- Built [`src/training_pipeline/run_winter_ablation.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/training_pipeline/run_winter_ablation.py): 6-way ablation matrix (`ABL-000` to `ABL-005`) evaluated across all 4 walk-forward folds using frozen EXP-019 architecture.
+- Built [`tests/test_winter_smog_features.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_winter_smog_features.py): 43 comprehensive unit tests validating proxy naming, backward-looking constraints, crop burning logic, and 6-criterion adoption gate.
+- **Ablation Results Summary (Overall RMSE by Configuration)**:
+  | Ablation ID | Description | F1 (Winter 21) | F2 (Trans/Sum) | F3 (Monsoon) | F4 (Winter 23) | Mean RMSE | Winter Mean Δ |
+  | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+  | **ABL-000** | Baseline (113 features) | 104.23 | 72.43 | 71.88 | 85.21 | 83.44 | Baseline |
+  | **ABL-001** | + Family 1 (Inversion Proxy) | 104.38 | 72.29 | 71.81 | 85.20 | 83.42 | -0.064 |
+  | **ABL-002** | + Family 2 (Fog/Mist Indicator)| 104.30 | 72.40 | 71.84 | 84.94 | 83.37 | +0.103 |
+  | **ABL-003** | + Family 3 (Stagnation Enh.) | 104.24 | 72.78 | 72.24 | 85.37 | 83.66 | -0.084 |
+  | **ABL-004** | + Family 4 (Seasonal Emission) | 103.86 | 72.40 | 71.75 | 85.31 | 83.33 | +0.139 |
+  | **ABL-005** | + All 4 Families Combined | 104.28 | 72.55 | 72.00 | 85.16 | 83.50 | +0.005 |
+- **Key Scientific Findings**:
+  1. **Surface Signal Saturation**: The entire spread across all ablations is **only 0.11 RMSE points** (83.33 to 83.44). Surface meteorological features are near their asymptotic information limit.
+  2. **Stagnation Redundancy**: Family 3 produced zero/negative incremental gain, confirming that existing `stagnation_index` (`pm2_5 / (wind_speed + 0.5)`) and wind lags already capture surface dispersion dynamics.
+  3. **Physical Limitation of Inversion Proxies**: Surface temperature changes cannot resolve the true vertical thermal structure (PBL height and lapse rates aloft) without upper-air sounding or vertical reanalysis data.
+  4. **Decision: Outcome B (EXP-019 Retained as Champion)**: Marginal gains (<0.15 RMSE) do not warrant added schema complexity. EXP-019 remains the locked production model.
+- **Reports**: `data/models/walk_forward/ablation/ablation_report.json`, `ablation_summary.csv`, `ablation_decision.json`.
+- **Notebook**: [`notebooks/15_winter_smog_ablation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/15_winter_smog_ablation.ipynb).
+- **Total test suite**: **233/233 tests passing (75% total codebase coverage)**.
+
 
