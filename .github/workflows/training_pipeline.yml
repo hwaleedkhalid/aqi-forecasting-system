@@ -1,0 +1,63 @@
+name: Candidate Model Evaluation & Stability Pipeline
+
+"on":
+  schedule:
+    - cron: "23 2 * * 0"  # Weekly on Sundays at 02:23 UTC (avoids midnight 00:00 contention)
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: "Identifier tag for candidate evaluation"
+        required: false
+        type: string
+        default: "candidate-eval"
+
+concurrency:
+  group: model-evaluation-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: Candidate Model Evaluation & Stability Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Record Production Model Hash (Immutability Guarantee)
+        run: |
+          sha256sum data/models/production_hybrid_model.joblib > /tmp/prod_model_hash_before.txt
+
+      - name: Run Candidate Model Evaluation
+        run: |
+          python -m src.training_pipeline.run_candidate_evaluation --output-dir data/models/candidate
+
+      - name: Assert Production Model Unmodified
+        run: |
+          sha256sum data/models/production_hybrid_model.joblib > /tmp/prod_model_hash_after.txt
+          diff /tmp/prod_model_hash_before.txt /tmp/prod_model_hash_after.txt || {
+            echo "::error::Invariant violation: Production champion artifact was modified!"
+            exit 1
+          }
+
+      - name: Upload Candidate Evaluation & Diagnostic Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-model-evaluation-reports
+          path: data/models/candidate/
+          retention-days: 14

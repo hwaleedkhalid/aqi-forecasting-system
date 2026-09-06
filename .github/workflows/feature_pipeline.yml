@@ -1,0 +1,67 @@
+name: Scheduled Feature Ingestion Pipeline
+
+"on":
+  schedule:
+    - cron: "17 * * * *"  # Scheduled at minute 17 to avoid minute-0 contention
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode (skip external API requests)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: feature-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    name: Hourly Telemetry Ingestion & Snapshot
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate API Key on Live Runs
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+        run: |
+          if [ -z "$OPENWEATHER_API_KEY" ]; then
+            echo "::error::OPENWEATHER_API_KEY secret is required for live scheduled feature pipeline."
+            exit 1
+          fi
+
+      - name: Run Ingestion & Validation
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python -m src.feature_pipeline.run_hourly_ingestion --dry-run
+          else
+            python -m src.feature_pipeline.run_hourly_ingestion
+          fi
+
+      - name: Upload Ingestion Snapshot Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hourly-telemetry-snapshot
+          path: data/snapshots/
+          retention-days: 7

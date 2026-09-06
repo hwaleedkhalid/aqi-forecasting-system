@@ -1,0 +1,44 @@
+name: Continuous Integration & Test Suite
+
+"on":
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Pytest & Coverage Enforcement
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Test Suite with Coverage (>=70% threshold)
+        run: |
+          mkdir -p reports
+          pytest --cov=src --cov-fail-under=70 -v --junitxml=reports/junit-report.xml --cov-report=xml:reports/coverage.xml --cov-report=term
+
+      - name: Upload Test & Coverage Reports Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-test-and-coverage-reports
+          path: reports/
+          retention-days: 14
