@@ -111,13 +111,13 @@
 - **Ablation Results Summary (Overall RMSE by Configuration)**:
   | Ablation ID | Description | F1 (Winter 21) | F2 (Trans/Sum) | F3 (Monsoon) | F4 (Winter 23) | Mean RMSE | Winter Mean Δ |
   | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-  | **ABL-000** | Baseline (114 canonical / 113 physical) | 104.23 | 72.43 | 71.88 | 85.21 | 83.44 | Baseline |
+  | **ABL-000** | Baseline (114 canonical model-input columns / 113 predictors in walk-forward evaluation excluding dt) | 104.23 | 72.43 | 71.88 | 85.21 | 83.44 | Baseline |
   | **ABL-001** | + Family 1 (Inversion Proxy) | 104.38 | 72.29 | 71.81 | 85.20 | 83.42 | -0.064 |
   | **ABL-002** | + Family 2 (Fog/Mist Indicator)| 104.30 | 72.40 | 71.84 | 84.94 | 83.37 | +0.103 |
   | **ABL-003** | + Family 3 (Stagnation Enh.) | 104.24 | 72.78 | 72.24 | 85.37 | 83.66 | -0.084 |
   | **ABL-004** | + Family 4 (Seasonal Emission) | 103.86 | 72.40 | 71.75 | 85.31 | 83.33 | +0.139 |
   | **ABL-005** | + All 4 Families Combined | 104.28 | 72.55 | 72.00 | 85.16 | 83.50 | +0.005 |
-- **Schema Note (113 physical vs 114 canonical features)**: The production champion model EXP-019 is serialized with the canonical 114-feature schema (where feature index 4 is the numeric epoch timestamp `dt`, alongside 113 physical meteorological, pollutant, and temporal features). During dynamic fold evaluations in Phase 11/11.5, `dt` was excluded as metadata to focus validation strictly on the 113 physical predictors. Both refer to the identical physical feature space, and the production inference contract strictly operates on the canonical 114-feature vector.
+- **Schema Note (114 canonical model-input columns / 113 predictors in walk-forward evaluation excluding dt)**: The production champion model EXP-019 is serialized with the canonical 114-feature schema (where feature index 4 is the numeric epoch timestamp `dt`, alongside 113 predictors including meteorological, pollutant, and temporal features). During dynamic fold evaluations in Phase 11/11.5, `dt` was excluded as metadata to focus validation strictly on the 113 predictors. Both refer to the identical feature space, and the production inference contract strictly operates on the canonical 114-feature vector.
 - **Key Scientific Findings**:
   1. **Limited Incremental Value from Surface Proxies**: Across all 6 configurations, mean RMSE ranges from 83.33 to 83.66 (full spread of 0.33 RMSE points). The maximum improvement over baseline is 0.11 RMSE points (83.44 → 83.33 with ABL-004), indicating surface meteorological features are near their predictive limit for this task.
   2. **Stagnation Redundancy**: Family 3 produced slight regressions in mean RMSE (83.44 → 83.66), supporting the hypothesis that the new stagnation features are largely redundant with existing features (`stagnation_index` and wind lags).
@@ -173,9 +173,13 @@
   - $h=1\dots6$: Pure LightGBM TreeExplainer (interventional perturbation, check_additivity=False)
   - $h=7\dots37$: Pure Ridge LinearExplainer with background mean adjustment
   - $h=38\dots72$: Blended Ridge + Persistence ($w_h \hat{y}^{\text{Ridge}} + (1-w_h) y_t$) scaling both base value and feature attributions ($w_h b_h + \sum w_h \phi_{i,h} + (1-w_h) y_t = \hat{y}_h$)
+  - Global importance aggregation: $I_i = \frac{1}{72} \sum_{h=1}^{72} \operatorname{mean}_n |\phi_{i,h,n}^{\text{final}}|$
+  - Scaled-space attribution in model $z$-space with dual raw/scaled API reporting.
+  - Strict additivity validated against `explained_output_preclip` before post-processing non-negative bounds.
 - Built [`src/inference/build_explainability_artifacts.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/build_explainability_artifacts.py) and serialized `data/models/explainability/` artifacts (`shap_background.npy`, `global_shap_importance.json`, `explainer_manifest.json`).
 - Updated [`src/inference/predictor.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/predictor.py): Added `explain_latest()` and `get_global_explainability()`.
 - Updated [`src/api/routes.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/api/routes.py): Added `GET /api/explain` with integer validation (`horizon=1..72`, `top_k=1..114`) and root freshness metadata.
 - Updated [`src/dashboard/components.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/components.py) and [`src/dashboard/app.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/dashboard/app.py): Added interactive horizon attribution Plotly bar chart, persistence component breakdown cards, and global importance table.
 - Built [`tests/test_explainer.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_explainer.py): 20 comprehensive unit, mathematical additivity, routing boundary, and contract consistency tests.
 - **Total test suite**: **346/346 tests passing (75% total codebase coverage)**.
+
