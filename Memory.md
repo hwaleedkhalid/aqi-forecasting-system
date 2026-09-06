@@ -51,7 +51,7 @@
 | **Phase 10.5E**| Final Untouched Test Benchmark | **Completed** ✅ | 2026-09-02 |
 | **Phase 11**| Multi-Year Walk-Forward Cross-Validation | **Completed** ✅ | 2026-09-06 |
 | **Phase 11.5**| Targeted Winter/Smog Feature Investigation | **Completed** ✅ | 2026-09-06 |
-| **Phase 12**| Build Multi-Horizon Inference Pipeline | Pending | - |
+| **Phase 12**| Build Multi-Horizon Inference Pipeline | **Completed** ✅ | 2026-09-06 |
 | **Phase 13**| Build Flask REST API | Pending | - |
 | **Phase 14**| Build Streamlit UI Dashboard | Pending | - |
 | **Phase 15**| Automate with GitHub Actions CI/CD | Pending | - |
@@ -125,5 +125,19 @@
 - **Reports**: `data/models/walk_forward/ablation/ablation_report.json`, `ablation_summary.csv`, `ablation_decision.json`.
 - **Notebook**: [`notebooks/15_winter_smog_ablation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/15_winter_smog_ablation.ipynb).
 - **Total test suite**: **233/233 tests passing (75% total codebase coverage)**.
+
+### Phase 12: Multi-Horizon Inference Pipeline
+- Built [`src/inference/model_loader.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/model_loader.py): Thread-safe `ModelLoader` loading production model (`production_hybrid_model.joblib`), scaler (`feature_scaler_v2_weather.joblib`), and canonical schema (`feature_schema_v2_weather.json`, 114 features in exact order).
+- Built [`src/inference/post_processing.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/post_processing.py): `AQIPostProcessor` generating official EPA categories, colors, public health advisories, extreme-event flags (`high_severity > 200`, `hazardous > 300`), and empirical prediction error intervals derived from 8,636 walk-forward out-of-fold residuals (`empirical_error_intervals.json`). Preserves raw non-negative predictions above 500.
+- Built [`src/inference/cache.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/cache.py): `PredictionCache` file-based JSON cache (`data/cached_predictions.json`) with TTL expiration and corruption safety.
+- Built [`src/inference/predictor.py`](file:///d:/10Perls/Pearls-AQI-Predictor/src/inference/predictor.py): `AQIPredictor` generating 72-hour forecast vectors with strict schema/column order validation, unscaled current AQI extraction, non-negative bounding ($\max(0, \hat{y})$), staleness and data freshness auditing (`input_observed_at`, `input_age_hours`, `is_stale`), and model provenance metadata.
+- Generated [`data/models/walk_forward/empirical_error_intervals.json`](file:///d:/10Perls/Pearls-AQI-Predictor/data/models/walk_forward/empirical_error_intervals.json): Empirical 10th and 90th percentile residual quantiles ($e_h = y_h - \hat{y}_h$) per horizon.
+- Created modular unit tests:
+  - [`tests/test_model_loader.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_model_loader.py) (8 tests)
+  - [`tests/test_post_processing.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_post_processing.py) (6 tests)
+  - [`tests/test_prediction_cache.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_prediction_cache.py) (5 tests)
+  - [`tests/test_predictor.py`](file:///d:/10Perls/Pearls-AQI-Predictor/tests/test_predictor.py) (7 tests, including strict column order validation)
+- **Total test suite**: **260/260 tests passing (74% total codebase coverage, 88–100% on inference modules)**.
+
 
 

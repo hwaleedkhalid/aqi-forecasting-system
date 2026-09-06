@@ -57,7 +57,7 @@ class HybridAQISpecialistModel(BaseAQIModel):
         self.is_fitted = True
         return self
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X: np.ndarray, clip_max: float | None = 500.0) -> np.ndarray:
         """Predict composite 72 horizons."""
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before calling predict.")
@@ -66,7 +66,9 @@ class HybridAQISpecialistModel(BaseAQIModel):
         p_rest = self.m_rest.predict(X)
 
         full_preds = np.hstack([p_short, p_rest])
-        return np.clip(full_preds, 0.0, 500.0)
+        if clip_max is not None:
+            return np.clip(full_preds, 0.0, clip_max)
+        return np.maximum(0.0, full_preds)
 
     def save(self, path: Path) -> Path:
         """Serialize hybrid components."""
@@ -139,16 +141,23 @@ class PersistenceAwareHybridModel(BaseAQIModel):
         self.is_fitted = True
         return self
 
-    def predict(self, X: np.ndarray, current_aqi: np.ndarray | None = None) -> np.ndarray:
+    def predict(
+        self,
+        X: np.ndarray,
+        current_aqi: np.ndarray | None = None,
+        clip_max: float | None = 500.0,
+    ) -> np.ndarray:
         """Predict 72 horizons with persistence blending on horizons 38..72.
 
         Args:
             X: Feature matrix of shape (N, n_features).
             current_aqi: Optional 1D array of shape (N,) containing unscaled current AQI.
                          If None, will be extracted from X using current_aqi_col_idx.
+            clip_max: Upper bound for prediction clipping. If None, predictions are
+                      bounded only from below at 0.0, preserving extreme event fidelity.
 
         Returns:
-            (N, 72) array of predictions clipped to [0, 500].
+            (N, 72) array of non-negative predictions.
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before calling predict.")
@@ -172,7 +181,9 @@ class PersistenceAwareHybridModel(BaseAQIModel):
         blended_long = p_long * self.blend_weights + curr_2d * (1.0 - self.blend_weights)
 
         full_preds = np.hstack([p_short, p_med, blended_long])
-        return np.clip(full_preds, 0.0, 500.0)
+        if clip_max is not None:
+            return np.clip(full_preds, 0.0, clip_max)
+        return np.maximum(0.0, full_preds)
 
     def save(self, path: Path) -> Path:
         """Serialize model."""
