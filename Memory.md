@@ -118,10 +118,10 @@
   | **ABL-004** | + Family 4 (Seasonal Emission) | 103.86 | 72.40 | 71.75 | 85.31 | 83.33 | +0.139 |
   | **ABL-005** | + All 4 Families Combined | 104.28 | 72.55 | 72.00 | 85.16 | 83.50 | +0.005 |
 - **Key Scientific Findings**:
-  1. **Surface Signal Saturation**: The entire spread across all ablations is **only 0.11 RMSE points** (83.33 to 83.44). Surface meteorological features are near their asymptotic information limit.
-  2. **Stagnation Redundancy**: Family 3 produced zero/negative incremental gain, confirming that existing `stagnation_index` (`pm2_5 / (wind_speed + 0.5)`) and wind lags already capture surface dispersion dynamics.
-  3. **Physical Limitation of Inversion Proxies**: Surface temperature changes cannot resolve the true vertical thermal structure (PBL height and lapse rates aloft) without upper-air sounding or vertical reanalysis data.
-  4. **Decision: Outcome B (EXP-019 Retained as Champion)**: Marginal gains (<0.15 RMSE) do not warrant added schema complexity. EXP-019 remains the locked production model.
+  1. **Limited Incremental Value from Surface Proxies**: Across all 6 configurations, mean RMSE ranges from 83.33 to 83.66 (full spread of 0.33 RMSE points). The maximum improvement over baseline is 0.11 RMSE points (83.44 → 83.33 with ABL-004), indicating surface meteorological features are near their predictive limit for this task.
+  2. **Stagnation Redundancy**: Family 3 produced slight regressions in mean RMSE (83.44 → 83.66), supporting the hypothesis that the new stagnation features are largely redundant with existing features (`stagnation_index` and wind lags).
+  3. **Plausible Information Gaps Beyond Surface Telemetry**: Surface proxies cannot represent vertical atmospheric profiles (PBL height, lapse rates aloft) or real-time emission dynamics (active fire counts). These remain plausible sources of additional information that the current surface-only feature set cannot represent.
+  4. **Decision: Outcome B (EXP-019 Retained as Champion)**: None of the tested feature families satisfied the predefined adoption criteria. The additional feature complexity is not justified by the observed walk-forward performance. EXP-019 remains the validated production champion.
 - **Reports**: `data/models/walk_forward/ablation/ablation_report.json`, `ablation_summary.csv`, `ablation_decision.json`.
 - **Notebook**: [`notebooks/15_winter_smog_ablation.ipynb`](file:///d:/10Perls/Pearls-AQI-Predictor/notebooks/15_winter_smog_ablation.ipynb).
 - **Total test suite**: **233/233 tests passing (75% total codebase coverage)**.
