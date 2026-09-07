@@ -1,6 +1,7 @@
 # Dedicated dependencies for Scheduled Hourly Feature Pipeline (GitHub Actions)
 # Preserves Render / Streamlit runtime isolation in requirements.txt
 hopsworks==5.0.6
+pyarrow>=10.0.0
 pandas>=2.0.0
 numpy>=1.24.0
 requests>=2.31.0
