@@ -27,6 +27,7 @@ from src.config import (
     API_TIMEOUT_SECONDS,
     OPENWEATHER_API_KEY,
     PROCESSED_DATA_DIR,
+    RUNTIME_DIR,
     TARGET_LAT,
     TARGET_LON,
 )
@@ -392,10 +393,20 @@ def run_hourly_pipeline(
             logger.warning(f"Dry-run live fetch skipped or failed ({e_live}); falling back to local dataset validation.")
             # Fallback for offline CI without API keys
             features_file = PROCESSED_DATA_DIR / "features_v2_weather.csv"
-            if not features_file.exists():
-                raise ValidationError("Neither live APIs nor local features_v2_weather.csv is available.")
-            local_df = pd.read_csv(features_file, nrows=100)
-            canonical_row = conn.project_inference_features(local_df.iloc[[-1]])
+            if features_file.exists():
+                local_df = pd.read_csv(features_file, nrows=100)
+                canonical_row = conn.project_inference_features(local_df.iloc[[-1]])
+            else:
+                bootstrap_json = RUNTIME_DIR / "bootstrap" / "latest_feature_vector.json"
+                if bootstrap_json.exists():
+                    with open(bootstrap_json, "r", encoding="utf-8") as f:
+                        bdata = json.load(f)
+                    bfeats = bdata.get("features", {})
+                    canonical_names = load_canonical_feature_names()
+                    canonical_row = pd.DataFrame([{col: bfeats.get(col, 0.0) for col in canonical_names}])
+                    canonical_row["dt"] = int(1788793200)
+                else:
+                    raise ValidationError("Neither live APIs nor local features_v2_weather.csv is available.")
             obs_dt = int(canonical_row["dt"].iloc[0])
             current_aqi = int(canonical_row["epa_aqi"].iloc[0])
             storage_df = conn.prepare_storage_dataframe(canonical_row)

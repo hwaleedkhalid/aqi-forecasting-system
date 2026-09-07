@@ -114,6 +114,8 @@ class TestAutomationRunners:
 
     def test_candidate_evaluation_preserves_production_champion(self, tmp_path):
         prod_path = Path("data/models/production_hybrid_model.joblib")
+        if not prod_path.exists():
+            prod_path = Path("data/runtime/production/production_hybrid_model.joblib")
         assert prod_path.exists(), "Production model artifact must exist"
         initial_mtime = prod_path.stat().st_mtime
 

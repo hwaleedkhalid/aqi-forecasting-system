@@ -34,12 +34,22 @@ def explainer(predictor) -> ModelExplainer:
 @pytest.fixture
 def sample_feature_vector(predictor) -> np.ndarray:
     """Get sample 114-feature row from dataset."""
-    obs = predictor.get_latest_observation()
+    import json
     import pandas as pd
-    from src.config import PROCESSED_DATA_DIR
-    df = pd.read_csv(PROCESSED_DATA_DIR / "features_v2_weather.csv").tail(1)
+    from src.config import PROCESSED_DATA_DIR, RUNTIME_DIR
     schema = predictor.model_loader.load_schema()
-    return df[schema].values
+    csv_file = PROCESSED_DATA_DIR / "features_v2_weather.csv"
+    if csv_file.exists():
+        df = pd.read_csv(csv_file).tail(1)
+        return df[schema].values
+    bootstrap_file = RUNTIME_DIR / "bootstrap" / "latest_feature_vector.json"
+    if bootstrap_file.exists():
+        with open(bootstrap_file, "r", encoding="utf-8") as f:
+            bdata = json.load(f)
+        bfeats = bdata.get("features", {})
+        return np.array([[bfeats.get(k, 0.0) for k in schema]], dtype=np.float64)
+    np.random.seed(42)
+    return np.random.uniform(10.0, 50.0, (1, len(schema)))
 
 
 @pytest.fixture

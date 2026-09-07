@@ -25,6 +25,7 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 MODELS_DIR = DATA_DIR / "models"
 PREDICTIONS_DIR = DATA_DIR / "predictions"
 LOGS_DIR = DATA_DIR / "logs"
+RUNTIME_DIR = DATA_DIR / "runtime"
 
 # =============================================================================
 # API Configuration

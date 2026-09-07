@@ -13,6 +13,9 @@ class TestDatasetDiagnostics:
     """Test distribution shift, seasonal segmentation, and report generation."""
 
     def test_generate_diagnostic_report_runs_and_saves(self, tmp_path: Path) -> None:
+        from src.config import PROCESSED_DATA_DIR
+        if not (PROCESSED_DATA_DIR / "historical_aqi_clean.csv").exists():
+            pytest.skip("Historical clean AQI data not present in repo checkout")
         diagnostics = DatasetDiagnostics()
         report_path = tmp_path / "test_report.json"
         report = diagnostics.generate_diagnostic_report(output_path=report_path)

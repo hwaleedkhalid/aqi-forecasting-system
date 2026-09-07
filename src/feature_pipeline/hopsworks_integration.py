@@ -23,6 +23,7 @@ from src.config import (
     HOPSWORKS_HOST,
     HOPSWORKS_PROJECT,
     PROCESSED_DATA_DIR,
+    RUNTIME_DIR,
 )
 from src.exceptions import FeatureStoreError, ValidationError
 from src.logger import logger
@@ -32,9 +33,14 @@ SCHEMA_PATH = PROCESSED_DATA_DIR / "feature_schema_v2_weather.json"
 
 def load_canonical_feature_names() -> list[str]:
     """Load the canonical 114 ordered feature names."""
-    if not SCHEMA_PATH.exists():
-        raise FileNotFoundError(f"Canonical schema file not found at {SCHEMA_PATH}")
-    with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+    schema_file = SCHEMA_PATH
+    if not schema_file.exists():
+        fallback_schema = RUNTIME_DIR / "production" / "feature_schema_v2_weather.json"
+        if fallback_schema.exists():
+            schema_file = fallback_schema
+        else:
+            raise FileNotFoundError(f"Canonical schema file not found at {SCHEMA_PATH} or {fallback_schema}")
+    with open(schema_file, "r", encoding="utf-8") as f:
         schema = json.load(f)
     features = schema.get("feature_names", schema.get("features", []))
     if len(features) != 114:

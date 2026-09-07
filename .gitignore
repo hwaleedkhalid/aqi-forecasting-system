@@ -23,7 +23,9 @@ data/logs/
 data/snapshots/
 data/cached_predictions.json
 
-# Whitelist versioned runtime deployment assets
+# Whitelist versioned runtime deployment assets and directory markers
+!data/**/.gitkeep
+!data/processed/feature_schema_v2_weather.json
 !data/runtime/
 !data/runtime/**
 
