@@ -244,11 +244,13 @@ Because GitHub Actions runners are ephemeral, pipeline outputs and logs are expl
 
 ## 15. Hopsworks Integration (Phase 16)
 
-To elevate the system architecture to MLOps standards, I integrated Hopsworks.
-*   **Feature Store**: Designed a 115-column cloud storage schema where the primary key is `location_id`, coupled with an event time `dt`, and the 113 predictor columns.
+To elevate the system architecture to MLOps standards, I integrated Hopsworks as a cloud feature store and model registry layer.
+*   **Feature Store Schema**: Designed a 115-column cloud storage schema where the primary key is `location_id`, coupled with an event time `dt`, and the 113 predictor columns.
 *   **Online Serving**: Configured low-latency entity-key lookups by `location_id`.
 *   **Inference Projection**: Ensured strict extraction routines that project the 115-column store data down to the exact ordered 114-column canonical schema required by the model.
 *   **Model Registry**: Packaged the production assets into a versioned bundle containing a `manifest.json` with SHA256 hashes for integrity verification. The bundle includes `production_hybrid_model.joblib`, `feature_scaler_v2_weather.joblib`, `feature_schema_v2_weather.json`, and `empirical_error_intervals.json`.
+
+During deployment verification, I conducted a live audit of the Hopsworks cloud environment. While cloud authentication to project `aqi_predictor_by_Waleed` succeeded, the remote Feature Store contained zero feature groups and zero registered models because earlier development utilized local integration mocks. Phase 16 was integration-ready, but Hopsworks was not an active production data or model dependency at deployment time.
 
 ## 16. Explainability (Phase 17)
 
@@ -263,7 +265,8 @@ The API reports attributions in scaled z-space (providing both raw and scaled va
 
 ## 17. Testing
 
-The codebase is protected by 346 individual tests spanning 27 test modules and a central `conftest.py`. Overall test coverage is 75%, but coverage for critical path inference modules runs between 88% and 100%. The CI pipeline enforces a strict 70% minimum coverage gate. The test suite comprehensively covers the API layer, model internals, data ingestion logic, feature engineering routines, training pipelines, inference paths, dashboard logic, workflow scripts, and the SHAP explainability engine.
+The codebase is protected by 355 individual automated tests spanning 28 test modules and a central `conftest.py`. Overall test coverage is 75%, with critical-path inference, model loading, and explainability modules achieving between 88% and 100% coverage. The CI pipeline enforces a strict 70% minimum coverage gate. The test suite comprehensively covers the API layer, model internals, data ingestion logic, feature engineering routines, training pipelines, inference paths, runtime asset integrity resolution, clean-clone bootstrap parity, dashboard logic, workflow scripts, and the SHAP explainability engine.
+
 
 ## 18. Challenges and Debugging
 
@@ -292,15 +295,15 @@ Throughout the project, several core architectural choices defined the system's 
 
 ## 20. Lessons Learned
 
-Executing this project end-to-end offered profound personal and professional insights. First and foremost, the critical importance of robust baselines cannot be overstated. Watching my complex TensorFlow network and Random Forest ensemble lose outright to a simple Ridge regression (Ridge v1) was a humbling and clarifying moment. It taught me that complexity is not a proxy for capability. 
+Executing this project end-to-end offered profound personal and professional insights. In the initial phase, I did not immediately begin implementation; I first reviewed the preparatory resources shared in the course Discord server. This dedicated review refreshed my understanding of Python project structuring and machine learning fundamentals, while solidifying strict Git and GitHub version control practices. Furthermore, GitHub Actions and CI/CD concepts were relatively new to me; studying workflow triggers, runner lifecycles, secrets management, and artifact persistence proved directly beneficial later in Phase 15 and during production deployment.
+
+First and foremost, the critical importance of robust baselines cannot be overstated. Watching my complex TensorFlow network and Random Forest ensemble lose outright to a simple Ridge regression (Ridge v1) was a humbling and clarifying moment. It taught me that complexity is not a proxy for capability.
 
 I also learned that data engineering often yields far higher returns than algorithm selection. The single largest leap in system performance came not from model tuning, but from integrating meteorology. Moving from 64 to 114 features by pulling Open-Meteo data drove the RMSE down from 82.97 to 78.38—a far larger gain than any architecture tweak provided.
 
 The implementation of the walk-forward validation framework was a watershed moment. It revealed that a single chronological train/test split can mask regime-specific failures. By splitting the evaluation temporally, I could clearly see that summer predictions were reliable, while winter smog episodes were severely stretching the model's capabilities. It showed me the limits of the data; the ablation study demonstrated that no amount of clever feature engineering on surface-level metrics could fully compensate for the lack of vertical atmospheric data.
 
-On the software engineering side, the upfront time spent on the Discord resources reviewing CI/CD pipelines paid off immensely. When I reached Phase 15, establishing the automation workflows was relatively frictionless because I understood the core mechanics of GitHub Actions. 
-
-Finally, I learned the value of operational discipline. Building a system that strictly freezes production artifacts, rigorously tests new candidates against held-out baselines, and reports empirical—rather than theoretical—errors fundamentally shifted my perspective from building ML scripts to engineering reliable ML systems.
+Finally, navigating the deployment journey taught me the value of operational discipline. Moving from local notebooks to a deployed system required rigorous dependency isolation, runtime artifact whitelisting, fail-closed integrity validation, continuous memory profiling, and cross-platform consistency. Building a system that strictly freezes production artifacts, rigorously tests candidates against held-out baselines, and reports empirical—rather than theoretical—errors fundamentally shifted my perspective from building standalone ML scripts to engineering reliable, production-grade ML systems.
 
 ## 21. Future Work
 
@@ -328,3 +331,146 @@ Several avenues exist for significant future enhancement:
 13. `13_final_test_benchmark.ipynb` — 7-model benchmark on held-out test
 14. `14_walk_forward_stability.ipynb` — 4-fold walk-forward validation
 15. `15_winter_smog_ablation.ipynb` — Winter/smog feature ablation
+
+## 23. Deployment and Production Hardening
+
+### 23.1 Deployment Architecture
+
+The final deployment architecture enforces a strict physical separation between user interface rendering and backend model inference:
+
+```text
+GitHub Repository
+       │
+       ├── Streamlit Community Cloud
+       │       └── Streamlit Frontend (src/dashboard/app.py)
+       │                │
+       │                │ HTTPS REST API Requests
+       │                ▼
+       └── Render (Free Web Service)
+               └── Flask REST API (src/api/app.py)
+                    ├── RuntimeAssetResolver
+                    ├── EXP-019 Production Hybrid Model
+                    ├── Empirical Prediction Error Intervals
+                    ├── SHAP Explainability Engine
+                    └── Bootstrap Feature Vector
+```
+
+This decoupled topology provides significant operational advantages:
+1.  **Separation of Concerns**: Presentation logic in Streamlit remains completely decoupled from model execution and data ingestion.
+2.  **Resource and Dependency Optimization**: The Streamlit frontend installs only 41 lightweight UI packages (~40 MB footprint) from `src/dashboard/requirements.txt`, avoiding heavy machine learning frameworks on the frontend container.
+3.  **Credential and Data Isolation**: The Flask API manages all internal runtime assets, schemas, and credentials on the backend server, exposing only validated JSON contracts.
+4.  **Independent Lifecycle**: The frontend and backend deploy and scale independently. If the frontend restarts, backend inference caches remain intact; if the backend sleeps on standby, the frontend cleanly presents service status notices.
+
+The system is deployed using **Streamlit Community Cloud** for the dashboard and **Render** for the Flask API, with Railway identified as a viable secondary backend alternative if additional memory or CPU resources become necessary.
+
+### 23.2 Deployment Problems and Investigation
+
+Transitioning from local development to cloud hosting revealed several critical architectural hurdles:
+
+#### 1. Ignored Runtime Artifacts and Clean-Clone Divergence
+In local development, the model loader and feature pipeline read from `data/models/` and `data/processed/`. However, standard `.gitignore` rules correctly exclude these directories to prevent committing multi-megabyte training caches and raw datasets to Git. On a clean Git clone, the backend initially crashed because the model files did not exist.
+*   **Investigation**: I recognized that cloud deployment platforms (Render, Railway) build directly from clean Git checkouts. They have no access to untracked local developer directories.
+*   **Solution**: I created a dedicated, versioned `data/runtime/` package containing only the frozen champion model, scaler, schema, empirical error intervals, explainability reference matrices, and bootstrap vector. I updated `.gitignore` with explicit whitelist rules (`!data/runtime/`, `!data/runtime/**`) while keeping large training datasets excluded.
+
+#### 2. Hopsworks Cloud Audit and Architectural Realignment
+Phase 16 implemented Hopsworks integration using local mock tests. When auditing the live cloud environment, I encountered DNS deprecation issues with the legacy `c.app.hopsworks.ai` endpoint in Hopsworks 3.4.0. Testing with the modern Hopsworks 5.0.6 client successfully authenticated against the cloud project `aqi_predictor_by_Waleed` (ID: 44159) via `https://eu-west.cloud.hopsworks.ai:443`.
+*   **Findings**: The live cloud Feature Store contained zero feature groups and zero registered models.
+*   **Resolution**: Rather than making cloud deployment depend on unpopulated remote infrastructure, I established the self-contained `data/runtime/` package as the authoritative production source. Phase 16 remains integration-ready in the codebase, but Hopsworks was not an active production dependency at deployment time.
+
+#### 3. Bootstrap Feature Vector and Ingestion Hierarchy
+A naive assumption was that the backend could reconstruct input features on the fly by querying current OpenWeather observations.
+*   **Investigation**: EXP-019 requires 114 engineered features, including 24-hour pollutant lags, rolling statistics, cross-pollutant chemical ratios, and multi-hour weather differentials. A single point-in-time API response lacks the 24+ hours of unbroken historical context required to compute these features.
+*   **Solution**: I established a committed canonical bootstrap feature vector (`data/runtime/bootstrap/latest_feature_vector.json`) representing a validated 114-column observation row. The runtime resolution hierarchy prioritizes: (1) verified fresh feature pipeline outputs, (2) Hopsworks Feature Store vectors when populated, and (3) committed bootstrap vectors.
+
+#### 4. Data Freshness and Observation Anchoring
+To avoid misleading users, the application implements strict data freshness transparency:
+*   The committed bootstrap vector is timestamped `2026-08-31T07:00:00+00:00`.
+*   The API calculates input age (`now - input_observed_at`) and marks `is_stale=true` whenever age exceeds 3.0 hours.
+*   The Streamlit dashboard prominently renders a warning banner explaining that telemetry is historical.
+*   Crucially, forecast timestamps (h1 through h72) are anchored to `forecast_origin = input_observed_at`, spanning `2026-08-31T08:00:00+00:00` to `2026-09-03T07:00:00+00:00`, rather than shifting dynamically with the client request time.
+
+#### 5. Frontend Dependency Leakage
+Initial frontend code imported `from src.inference.predictor import AQIPredictor` at the top of `src/dashboard/data_client.py`. When Streamlit Cloud attempted to build the dashboard with a lightweight dependency list, it failed because `AQIPredictor` pulled in `scikit-learn`, `lightgbm`, and `shap`.
+*   **Solution**: I refactored `DashboardDataClient` to remove top-level inference imports, configured `ENABLE_LOCAL_FALLBACK=false` for cloud deployment, lazy-imported `AQIPredictor` strictly inside local fallback branches, and created `src/dashboard/requirements.txt` containing only UI packages.
+
+#### 6. Render Memory Profiling and Concurrency Sizing
+Render's free tier provides 512 MB RAM and 0.1 CPU. I conducted live process memory profiling across all endpoint states using a continuous high-frequency background RSS sampler (5ms interval):
+*   **Flask Startup & EXP-019 Load**: 176.95 MB RSS
+*   **72-Hour Forecast Execution**: 178.62 MB to 185.08 MB RSS
+*   **SHAP Multi-Horizon Explainability Peak**: 360.81 MB transient peak RSS (settling back to 190.06 MB after garbage collection)
+*   **Render Free Allocation**: 512.00 MB
+*   **Available Headroom at Transient Peak**: 151.19 MB (29.5% free headroom)
+
+*Analysis*: The backend fits comfortably within Render's 512 MB allocation for a single worker. However, because SHAP creates transient allocation matrices during multi-horizon tree and linear evaluation, running multiple Gunicorn workers would duplicate memory and risk out-of-memory termination. While the deployment was configured with `gunicorn src.api.app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120`, memory profiling confirms that a single worker (`--workers 1`) is the conservative and stable operational model.
+
+#### 7. Build Environment and Dependency Resolution
+During initial deployment on Render, two build issues occurred:
+*   **Default Python Version**: Render defaulted to Python 3.14, which lacked pre-compiled binary wheels for machine learning libraries. I pinned Python `3.10.14` via a root `.python-version` file.
+*   **Pip Backtracking**: Including offline baseline tools (`tensorflow>=2.13`) and legacy client constraints (`hopsworks<4.0`) in the root `requirements.txt` caused pip to backtrack across 10 years of C++ source tarballs (`grpcio`, `google-pasta`), causing build timeouts. I separated runtime dependencies into `requirements.txt` (installing in <30 seconds) and developer dependencies into `requirements-dev.txt`.
+
+#### 8. Cross-Platform Line-Ending Hashes
+On Windows, Git checked out JSON files with CRLF (`\r\n`), whereas Linux (Render) checked them out with LF (`\n`). This caused SHA256 checksum mismatches on text configuration files during boot.
+*   **Solution**: I added `.gitattributes` enforcing `*.json text eol=lf` and updated `compute_file_sha256` in `src/inference/runtime_resolver.py` to normalize JSON text to LF before hashing.
+
+### 23.3 Runtime Integrity and Validation
+
+The runtime layer implements a fail-closed integrity system managed by `RuntimeAssetResolver`:
+*   **Cryptographic SHA256 Checksums**: Validates production artifacts against `manifest.json` on boot. Any tampered model file or corrupted byte triggers an immediate `ValidationError` and returns HTTP 503.
+*   **Model-Explainer Binding**: `explainer_manifest.json` binds the SHA256 hashes of the model, schema, and background matrix to ensure explainability artifacts cannot be used with mismatched models.
+*   **Bootstrap Schema Binding**: `latest_feature_vector.json` encodes `schema_sha256`, which must match the active production schema.
+*   **Finite Numeric Enforcement**: Validates that all 114 features are present in canonical order and rejects non-finite numeric entries (`NaN`, `Infinity`, `-Infinity`).
+*   **Timestamp Parsing**: Strictly validates ISO 8601 UTC timestamps.
+
+These checks serve as robust internal corruption-detection mechanisms to guarantee runtime stability.
+
+### 23.4 Clean-Clone Verification
+
+To prove production readiness, I conducted a genuine clean-clone test in an isolated temporary directory:
+1.  Cloned the repository into a fresh directory completely devoid of local files.
+2.  Verified that `.env`, `data/models/`, `data/processed/`, `data/raw/`, and `data/logs/` were completely absent.
+3.  Booted Flask using only committed `data/runtime/` assets.
+4.  Executed endpoint verification:
+    *   `GET /api/health` -> HTTP 200 OK (`service_ready: true`, `model_id: "EXP-019"`).
+    *   `GET /api/current` -> HTTP 200 OK (`current_aqi: 100.0`, `is_stale: true`, exact parity with historical August 31 row).
+    *   `GET /api/forecast` -> HTTP 200 OK (72 horizons, Origin `2026-08-31T07:00:00+00:00`, H1 `2026-08-31T08:00:00+00:00`, H72 `2026-09-03T07:00:00+00:00`).
+    *   `GET /api/model/info` -> HTTP 200 OK (`EXP-019`, 114 features, R² 0.4858).
+    *   `GET /api/explain?horizon=24` -> HTTP 200 OK (Predicted AQI `154.15`, matching forecast H24; additivity error `< 1e-6`).
+
+
+### 23.5 CORS and Frontend/API Communication
+
+The Streamlit dashboard communicates with the Flask REST API via server-side Python `requests`. Because the HTTP requests originate from the Streamlit Cloud server rather than the end-user's browser, browser-enforced Cross-Origin Resource Sharing (CORS) restrictions do not apply to the primary dashboard data path. Nevertheless, CORS middleware is configured on the Flask API (`CORS_ORIGINS=*`) to support future browser-based single-page applications or third-party client integrations.
+
+### 23.6 Final Live Deployment
+
+The system is publicly deployed and operational:
+*   **Live Frontend**: [https://aqi-forecasting.streamlit.app](https://aqi-forecasting.streamlit.app) (Streamlit Community Cloud)
+*   **Live Backend REST API**: [https://aqi-forecasting-xyyb.onrender.com/api](https://aqi-forecasting-xyyb.onrender.com/api) (Render Free Web Service)
+
+*(Note: These represent the verified deployment endpoints at final project testing time. Third-party hosting availability is not permanently guaranteed.)*
+
+**Verified User-Facing Capabilities**:
+*   **Telemetry Overview**: Displays bootstrap baseline AQI (100.0, Moderate) with a prominent stale data warning banner.
+*   **72-Hour Forecast Trajectory**: Interactive Plotly curve displaying predictions anchored to `2026-08-31T07:00:00+00:00`.
+*   **Empirical Prediction Error Intervals**: Shaded residual bands reflecting walk-forward empirical uncertainty (10th to 90th percentiles).
+*   **Multi-Horizon Milestone Cards**: Summaries for key milestones (+1h, +12h, +24h, +48h, +72h).
+*   **SHAP Feature Attribution Explorer**: Interactive slider allowing users to inspect feature impact across any horizon from 1 to 72.
+*   **Model Provenance**: Sidebar detailing architecture, training span, test benchmarks, and active REST API source mode.
+
+### 23.7 Deployment Challenges Summary
+
+| Challenge | Cause | Investigation | Solution | Result |
+| :--- | :--- | :--- | :--- | :--- |
+| **Ignored Runtime Artifacts** | `data/models/` and `data/processed/` excluded by `.gitignore`. | Clean Git clone on cloud servers failed due to missing model files. | Created self-contained `data/runtime/` package and added explicit `.gitignore` whitelist rules. | Clean clones boot deterministically without untracked files. |
+| **Hopsworks Cloud Dependency** | Remote Hopsworks instance contained 0 feature groups and 0 models. | Live cloud audit revealed Phase 16 was developed using integration mocks. | Made `data/runtime/` the primary source of truth; preserved Hopsworks as optional integration. | Deployment operates independently of remote feature store status. |
+| **Feature Reconstruction on Boot** | EXP-019 requires 114 engineered lag and rolling features. | Single OpenWeather API call cannot reconstruct 24+ hours of historical context. | Created canonical bootstrap feature vector (`latest_feature_vector.json`). | Cold-start boot reliably generates valid 72-hour forecasts. |
+| **Frontend Dependency Bloat** | `data_client.py` imported `AQIPredictor` at module scope. | Streamlit Cloud attempted to install heavy ML packages (`shap`, `lightgbm`). | Lazy-imported predictor inside fallback branch, set `ENABLE_LOCAL_FALLBACK=false`, and created `src/dashboard/requirements.txt`. | Frontend container installs in 1.6s with only 41 lightweight UI packages. |
+| **Render Memory Constraints** | Free tier allocates 512 MB RAM. | Continuous 5ms sampling revealed transient SHAP attribution peak of 360.81 MB. | Restricted Gunicorn concurrency to a single application worker (`--workers 1`). | API runs stably with 151.19 MB (29.5%) headroom during peak calculation. |
+| **Build Dependency Conflicts** | `tensorflow` and legacy `hopsworks<4.0` in root `requirements.txt`. | Pip backtracked across 10 years of C++ source tarballs, causing 19+ min build timeouts. | Separated runtime requirements into `requirements.txt` and dev tools into `requirements-dev.txt`. | Render build completed in under 45 seconds using pre-compiled wheels. |
+| **WSGI Start Command Syntax** | Unquoted parentheses `create_app()` in Render start command. | Linux bash parsed parentheses as shell subshell operators, exiting with status 2. | Exported module-level `app = create_app()` in `src/api/app.py` and updated start command to `src.api.app:app`. | Gunicorn boots cleanly on Render startup. |
+| **Cross-Platform Checksum Mismatches** | Windows CRLF (`\r\n`) vs Linux LF (`\n`) line endings in JSON text files. | Hash of `feature_schema_v2_weather.json` diverged between development and Render Linux. | Added `.gitattributes` enforcing `eol=lf` and updated resolver to normalize JSON text before hashing. | SHA256 checksums match identically across Windows and Linux. |
+
+### 23.8 Final Project Outcome
+
+The Pearls AQI Predictor project is fully implemented, thoroughly tested, and publicly deployed. The application is reproducibly bootable from a clean Git clone, hosted across Streamlit Community Cloud and Render, and accessible through an interactive web dashboard backed by a high-speed Flask REST API. Operating on the frozen champion model EXP-019, the system delivers 72 continuous hourly predictions with empirical prediction error intervals, multi-horizon SHAP feature attributions, and transparent data freshness indicators.
+
