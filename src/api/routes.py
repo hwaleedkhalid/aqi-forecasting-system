@@ -66,6 +66,8 @@ def health_check() -> Any:
     now = datetime.now(timezone.utc)
     try:
         predictor = get_predictor()
+        # Verify runtime manifest and SHA256 integrity
+        predictor.runtime_resolver.verify_runtime_integrity()
         # Verify model artifact readiness
         model = predictor.model_loader.load_model()
         scaler = predictor.model_loader.load_scaler()

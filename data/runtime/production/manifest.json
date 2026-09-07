@@ -1,0 +1,20 @@
+{
+  "model_id": "EXP-019",
+  "model_version": "1.0-production",
+  "feature_count": 114,
+  "schema_version": "v2_weather_enriched",
+  "created_at": "2026-09-06T20:49:00.174217+00:00",
+  "benchmarks": {
+    "overall_rmse": 75.91,
+    "overall_mae": 53.55,
+    "overall_r2": 0.4858,
+    "h1_rmse": 50.43,
+    "h72_rmse": 77.43
+  },
+  "files": {
+    "production_hybrid_model.joblib": "f51d2eff53b8eadaf7ddb615f1dc76aeed30526038c79cc68ae758e52d8412ee",
+    "feature_scaler_v2_weather.joblib": "9ce7e9fcc4fe65c2ac3b52c48c1215622112c9e3827d2c42d9d2c36fa246f063",
+    "feature_schema_v2_weather.json": "d83bf380acdbaf935f813c58554581a0b58aa3518ebd1fe5b848df853dabb4da",
+    "empirical_error_intervals.json": "81a66f468011daca47daccd879b525bd72a02558d07046b531f33e170b7e4b68"
+  }
+}

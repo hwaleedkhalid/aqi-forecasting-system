@@ -22,6 +22,10 @@ data/predictions/
 data/logs/
 data/cached_predictions.json
 
+# Whitelist versioned runtime deployment assets
+!data/runtime/
+!data/runtime/**
+
 ## Jupyter
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/

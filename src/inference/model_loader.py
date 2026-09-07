@@ -14,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 
 from src.config import MODELS_DIR, PROCESSED_DATA_DIR
 from src.exceptions import ValidationError
+from src.inference.runtime_resolver import RuntimeAssetResolver
 from src.logger import logger
 from src.models.hybrid_specialist_model import PersistenceAwareHybridModel
 
@@ -26,17 +27,20 @@ class ModelLoader:
         model_path: Path | str | None = None,
         scaler_path: Path | str | None = None,
         schema_path: Path | str | None = None,
+        resolver: RuntimeAssetResolver | None = None,
     ) -> None:
         """Initialize ModelLoader with artifact paths.
 
         Args:
-            model_path: Path to serialized production model (default: production_hybrid_model.joblib).
-            scaler_path: Path to fitted StandardScaler (default: feature_scaler_v2_weather.joblib).
-            schema_path: Path to feature schema JSON (default: feature_schema_v2_weather.json).
+            model_path: Path to serialized production model (default from RuntimeAssetResolver).
+            scaler_path: Path to fitted StandardScaler (default from RuntimeAssetResolver).
+            schema_path: Path to feature schema JSON (default from RuntimeAssetResolver).
+            resolver: Optional RuntimeAssetResolver instance.
         """
-        self.model_path = Path(model_path or MODELS_DIR / "production_hybrid_model.joblib")
-        self.scaler_path = Path(scaler_path or MODELS_DIR / "feature_scaler_v2_weather.joblib")
-        self.schema_path = Path(schema_path or PROCESSED_DATA_DIR / "feature_schema_v2_weather.json")
+        self.resolver = resolver or RuntimeAssetResolver()
+        self.model_path = Path(model_path or self.resolver.get_model_path())
+        self.scaler_path = Path(scaler_path or self.resolver.get_scaler_path())
+        self.schema_path = Path(schema_path or self.resolver.get_schema_path())
 
         self._model: PersistenceAwareHybridModel | None = None
         self._scaler: StandardScaler | None = None

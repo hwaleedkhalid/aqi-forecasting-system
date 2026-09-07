@@ -20,12 +20,11 @@ from sklearn.preprocessing import StandardScaler
 
 from src.config import MODELS_DIR, PROCESSED_DATA_DIR
 from src.exceptions import ValidationError
-from src.inference.hopsworks_registry import compute_file_sha256
+from src.inference.runtime_resolver import RuntimeAssetResolver, compute_file_sha256
 from src.logger import logger
 from src.models.hybrid_specialist_model import PersistenceAwareHybridModel
 
 EXPLAINABILITY_DIR = MODELS_DIR / "explainability"
-SCHEMA_PATH = PROCESSED_DATA_DIR / "feature_schema_v2_weather.json"
 
 
 class ModelExplainer:
@@ -37,6 +36,7 @@ class ModelExplainer:
         scaler: StandardScaler,
         feature_names: list[str],
         background_data: np.ndarray | None = None,
+        resolver: RuntimeAssetResolver | None = None,
     ) -> None:
         """Initialize explainer.
 
@@ -45,7 +45,9 @@ class ModelExplainer:
             scaler: Fitted StandardScaler for 114 canonical features.
             feature_names: Ordered list of 114 canonical feature names.
             background_data: (N_bg, 114) scaled background reference matrix.
+            resolver: Optional RuntimeAssetResolver instance.
         """
+        self.resolver = resolver or RuntimeAssetResolver()
         self.model = model
         self.scaler = scaler
         self.feature_names = feature_names
@@ -83,7 +85,8 @@ class ModelExplainer:
 
     def _load_or_create_background(self) -> np.ndarray:
         """Load background numpy array or generate from processed training features."""
-        bg_path = EXPLAINABILITY_DIR / "shap_background.npy"
+        expl_dir = self.resolver.get_explainability_dir()
+        bg_path = expl_dir / "shap_background.npy"
         if bg_path.exists():
             return np.load(bg_path)
 

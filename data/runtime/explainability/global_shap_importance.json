@@ -1,0 +1,917 @@
+{
+  "generated_at": "2026-09-06T11:32:21.595691+00:00",
+  "model_id": "EXP-019",
+  "cohort_samples": 500,
+  "background_samples": 100,
+  "global_persistence_mean_contribution": 17.3951,
+  "overall_feature_importance": [
+    {
+      "rank": 1,
+      "feature": "pm10",
+      "mean_abs_shap": 85.6942
+    },
+    {
+      "rank": 2,
+      "feature": "pm10_lag_1h",
+      "mean_abs_shap": 63.0328
+    },
+    {
+      "rank": 3,
+      "feature": "epa_aqi_rolling_mean_12h",
+      "mean_abs_shap": 39.4798
+    },
+    {
+      "rank": 4,
+      "feature": "temperature_2m_rolling_mean_12h",
+      "mean_abs_shap": 35.7345
+    },
+    {
+      "rank": 5,
+      "feature": "pm10_lag_6h",
+      "mean_abs_shap": 34.955
+    },
+    {
+      "rank": 6,
+      "feature": "co",
+      "mean_abs_shap": 33.7315
+    },
+    {
+      "rank": 7,
+      "feature": "pm2_5_lag_6h",
+      "mean_abs_shap": 31.5372
+    },
+    {
+      "rank": 8,
+      "feature": "temperature_2m_rolling_mean_24h",
+      "mean_abs_shap": 31.2804
+    },
+    {
+      "rank": 9,
+      "feature": "epa_aqi_rolling_mean_6h",
+      "mean_abs_shap": 31.1011
+    },
+    {
+      "rank": 10,
+      "feature": "pm10_lag_3h",
+      "mean_abs_shap": 30.7412
+    },
+    {
+      "rank": 11,
+      "feature": "pm2_5_rolling_mean_24h",
+      "mean_abs_shap": 30.586
+    },
+    {
+      "rank": 12,
+      "feature": "epa_aqi_rolling_mean_24h",
+      "mean_abs_shap": 29.9454
+    },
+    {
+      "rank": 13,
+      "feature": "pm10_lag_12h",
+      "mean_abs_shap": 29.7648
+    },
+    {
+      "rank": 14,
+      "feature": "surface_pressure_lag_6h",
+      "mean_abs_shap": 28.5565
+    },
+    {
+      "rank": 15,
+      "feature": "temperature_2m_rolling_mean_6h",
+      "mean_abs_shap": 28.2327
+    },
+    {
+      "rank": 16,
+      "feature": "pm10_lag_24h",
+      "mean_abs_shap": 28.1903
+    },
+    {
+      "rank": 17,
+      "feature": "pm2_5_lag_3h",
+      "mean_abs_shap": 27.1423
+    },
+    {
+      "rank": 18,
+      "feature": "pm2_5_rolling_mean_6h",
+      "mean_abs_shap": 25.2661
+    },
+    {
+      "rank": 19,
+      "feature": "pm2_5_lag_12h",
+      "mean_abs_shap": 24.4565
+    },
+    {
+      "rank": 20,
+      "feature": "month_sin",
+      "mean_abs_shap": 23.4017
+    },
+    {
+      "rank": 21,
+      "feature": "pm2_5",
+      "mean_abs_shap": 21.6042
+    },
+    {
+      "rank": 22,
+      "feature": "pm2_5_rolling_mean_12h",
+      "mean_abs_shap": 20.6779
+    },
+    {
+      "rank": 23,
+      "feature": "surface_pressure_lag_3h",
+      "mean_abs_shap": 20.5326
+    },
+    {
+      "rank": 24,
+      "feature": "temperature_2m",
+      "mean_abs_shap": 18.0796
+    },
+    {
+      "rank": 25,
+      "feature": "surface_pressure_lag_12h",
+      "mean_abs_shap": 15.8868
+    },
+    {
+      "rank": 26,
+      "feature": "relative_humidity_2m_rolling_mean_6h",
+      "mean_abs_shap": 15.8337
+    },
+    {
+      "rank": 27,
+      "feature": "relative_humidity_2m_rolling_mean_12h",
+      "mean_abs_shap": 15.4262
+    },
+    {
+      "rank": 28,
+      "feature": "temperature_2m_lag_1h",
+      "mean_abs_shap": 14.551
+    },
+    {
+      "rank": 29,
+      "feature": "pm2_5_lag_24h",
+      "mean_abs_shap": 14.1793
+    },
+    {
+      "rank": 30,
+      "feature": "no2",
+      "mean_abs_shap": 13.8358
+    },
+    {
+      "rank": 31,
+      "feature": "temperature_2m_lag_6h",
+      "mean_abs_shap": 13.5067
+    },
+    {
+      "rank": 32,
+      "feature": "pm2_5_lag_1h",
+      "mean_abs_shap": 12.6783
+    },
+    {
+      "rank": 33,
+      "feature": "no",
+      "mean_abs_shap": 12.3543
+    },
+    {
+      "rank": 34,
+      "feature": "relative_humidity_2m_rolling_mean_24h",
+      "mean_abs_shap": 11.8543
+    },
+    {
+      "rank": 35,
+      "feature": "temperature_2m_rolling_std_24h",
+      "mean_abs_shap": 11.6491
+    },
+    {
+      "rank": 36,
+      "feature": "dt",
+      "mean_abs_shap": 11.3302
+    },
+    {
+      "rank": 37,
+      "feature": "temperature_2m_lag_3h",
+      "mean_abs_shap": 11.3265
+    },
+    {
+      "rank": 38,
+      "feature": "thermal_moisture_index",
+      "mean_abs_shap": 10.8182
+    },
+    {
+      "rank": 39,
+      "feature": "temperature_2m_lag_12h",
+      "mean_abs_shap": 10.6824
+    },
+    {
+      "rank": 40,
+      "feature": "temperature_2m_lag_24h",
+      "mean_abs_shap": 10.3141
+    },
+    {
+      "rank": 41,
+      "feature": "wind_dir_sin",
+      "mean_abs_shap": 9.0251
+    },
+    {
+      "rank": 42,
+      "feature": "epa_aqi_rolling_min_24h",
+      "mean_abs_shap": 8.5416
+    },
+    {
+      "rank": 43,
+      "feature": "relative_humidity_2m",
+      "mean_abs_shap": 8.2215
+    },
+    {
+      "rank": 44,
+      "feature": "surface_pressure_lag_24h",
+      "mean_abs_shap": 7.7183
+    },
+    {
+      "rank": 45,
+      "feature": "surface_pressure",
+      "mean_abs_shap": 7.5932
+    },
+    {
+      "rank": 46,
+      "feature": "surface_pressure_lag_1h",
+      "mean_abs_shap": 7.4999
+    },
+    {
+      "rank": 47,
+      "feature": "hour_sin",
+      "mean_abs_shap": 7.3425
+    },
+    {
+      "rank": 48,
+      "feature": "hour_cos",
+      "mean_abs_shap": 6.679
+    },
+    {
+      "rank": 49,
+      "feature": "pm2_5_diff_24h",
+      "mean_abs_shap": 6.6591
+    },
+    {
+      "rank": 50,
+      "feature": "pm2_5_rolling_max_24h",
+      "mean_abs_shap": 6.3653
+    },
+    {
+      "rank": 51,
+      "feature": "relative_humidity_2m_lag_12h",
+      "mean_abs_shap": 6.1902
+    },
+    {
+      "rank": 52,
+      "feature": "pm2_5_rolling_std_24h",
+      "mean_abs_shap": 6.1714
+    },
+    {
+      "rank": 53,
+      "feature": "so2",
+      "mean_abs_shap": 6.1413
+    },
+    {
+      "rank": 54,
+      "feature": "no2_lag_1h",
+      "mean_abs_shap": 6.1351
+    },
+    {
+      "rank": 55,
+      "feature": "epa_aqi_lag_12h",
+      "mean_abs_shap": 5.9127
+    },
+    {
+      "rank": 56,
+      "feature": "relative_humidity_2m_rolling_std_24h",
+      "mean_abs_shap": 5.9058
+    },
+    {
+      "rank": 57,
+      "feature": "relative_humidity_2m_lag_6h",
+      "mean_abs_shap": 5.2795
+    },
+    {
+      "rank": 58,
+      "feature": "temperature_2m_rolling_std_12h",
+      "mean_abs_shap": 5.2565
+    },
+    {
+      "rank": 59,
+      "feature": "epa_aqi",
+      "mean_abs_shap": 5.079
+    },
+    {
+      "rank": 60,
+      "feature": "relative_humidity_2m_lag_1h",
+      "mean_abs_shap": 5.0719
+    },
+    {
+      "rank": 61,
+      "feature": "relative_humidity_2m_lag_24h",
+      "mean_abs_shap": 4.9575
+    },
+    {
+      "rank": 62,
+      "feature": "pm2_5_rolling_min_24h",
+      "mean_abs_shap": 4.8967
+    },
+    {
+      "rank": 63,
+      "feature": "day_cos",
+      "mean_abs_shap": 4.5965
+    },
+    {
+      "rank": 64,
+      "feature": "epa_aqi_lag_6h",
+      "mean_abs_shap": 4.4538
+    },
+    {
+      "rank": 65,
+      "feature": "relative_humidity_2m_lag_3h",
+      "mean_abs_shap": 4.1988
+    },
+    {
+      "rank": 66,
+      "feature": "epa_aqi_lag_1h",
+      "mean_abs_shap": 4.0494
+    },
+    {
+      "rank": 67,
+      "feature": "pm2_5_rolling_std_12h",
+      "mean_abs_shap": 4.035
+    },
+    {
+      "rank": 68,
+      "feature": "no2_lag_3h",
+      "mean_abs_shap": 4.0023
+    },
+    {
+      "rank": 69,
+      "feature": "day_sin",
+      "mean_abs_shap": 3.908
+    },
+    {
+      "rank": 70,
+      "feature": "pm2_5_diff_1h",
+      "mean_abs_shap": 3.7592
+    },
+    {
+      "rank": 71,
+      "feature": "no2_lag_6h",
+      "mean_abs_shap": 3.6153
+    },
+    {
+      "rank": 72,
+      "feature": "stagnation_index",
+      "mean_abs_shap": 3.4589
+    },
+    {
+      "rank": 73,
+      "feature": "temperature_2m_rolling_std_6h",
+      "mean_abs_shap": 3.4005
+    },
+    {
+      "rank": 74,
+      "feature": "month_cos",
+      "mean_abs_shap": 3.2041
+    },
+    {
+      "rank": 75,
+      "feature": "no2_lag_12h",
+      "mean_abs_shap": 3.1375
+    },
+    {
+      "rank": 76,
+      "feature": "wind_speed_10m_rolling_mean_24h",
+      "mean_abs_shap": 3.0597
+    },
+    {
+      "rank": 77,
+      "feature": "wind_speed_10m",
+      "mean_abs_shap": 2.9442
+    },
+    {
+      "rank": 78,
+      "feature": "epa_aqi_lag_24h",
+      "mean_abs_shap": 2.8916
+    },
+    {
+      "rank": 79,
+      "feature": "pm2_5_rolling_std_6h",
+      "mean_abs_shap": 2.7983
+    },
+    {
+      "rank": 80,
+      "feature": "pm_ratio",
+      "mean_abs_shap": 2.7865
+    },
+    {
+      "rank": 81,
+      "feature": "is_weekend",
+      "mean_abs_shap": 2.5969
+    },
+    {
+      "rank": 82,
+      "feature": "o3",
+      "mean_abs_shap": 2.5885
+    },
+    {
+      "rank": 83,
+      "feature": "relative_humidity_2m_rolling_std_12h",
+      "mean_abs_shap": 2.556
+    },
+    {
+      "rank": 84,
+      "feature": "no2_lag_24h",
+      "mean_abs_shap": 2.5451
+    },
+    {
+      "rank": 85,
+      "feature": "nh3",
+      "mean_abs_shap": 2.5158
+    },
+    {
+      "rank": 86,
+      "feature": "epa_aqi_rolling_std_12h",
+      "mean_abs_shap": 2.4211
+    },
+    {
+      "rank": 87,
+      "feature": "wind_speed_10m_rolling_mean_12h",
+      "mean_abs_shap": 2.3607
+    },
+    {
+      "rank": 88,
+      "feature": "o3_lag_12h",
+      "mean_abs_shap": 2.343
+    },
+    {
+      "rank": 89,
+      "feature": "pressure_diff_24h",
+      "mean_abs_shap": 2.2334
+    },
+    {
+      "rank": 90,
+      "feature": "o3_lag_6h",
+      "mean_abs_shap": 1.8993
+    },
+    {
+      "rank": 91,
+      "feature": "epa_aqi_lag_3h",
+      "mean_abs_shap": 1.8948
+    },
+    {
+      "rank": 92,
+      "feature": "wind_speed_10m_rolling_mean_6h",
+      "mean_abs_shap": 1.8588
+    },
+    {
+      "rank": 93,
+      "feature": "epa_aqi_rolling_std_24h",
+      "mean_abs_shap": 1.8233
+    },
+    {
+      "rank": 94,
+      "feature": "o3_lag_1h",
+      "mean_abs_shap": 1.7177
+    },
+    {
+      "rank": 95,
+      "feature": "epa_aqi_rolling_std_6h",
+      "mean_abs_shap": 1.7147
+    },
+    {
+      "rank": 96,
+      "feature": "o3_lag_24h",
+      "mean_abs_shap": 1.5152
+    },
+    {
+      "rank": 97,
+      "feature": "o3_lag_3h",
+      "mean_abs_shap": 1.489
+    },
+    {
+      "rank": 98,
+      "feature": "combustion_index",
+      "mean_abs_shap": 1.4719
+    },
+    {
+      "rank": 99,
+      "feature": "nitrogen_ozone_ratio",
+      "mean_abs_shap": 1.3862
+    },
+    {
+      "rank": 100,
+      "feature": "epa_aqi_rolling_max_24h",
+      "mean_abs_shap": 1.2633
+    },
+    {
+      "rank": 101,
+      "feature": "epa_aqi_diff_24h",
+      "mean_abs_shap": 1.216
+    },
+    {
+      "rank": 102,
+      "feature": "relative_humidity_2m_rolling_std_6h",
+      "mean_abs_shap": 1.2159
+    },
+    {
+      "rank": 103,
+      "feature": "pressure_diff_1h",
+      "mean_abs_shap": 1.1118
+    },
+    {
+      "rank": 104,
+      "feature": "wind_speed_10m_rolling_std_12h",
+      "mean_abs_shap": 0.9244
+    },
+    {
+      "rank": 105,
+      "feature": "wind_speed_10m_rolling_std_24h",
+      "mean_abs_shap": 0.8264
+    },
+    {
+      "rank": 106,
+      "feature": "wind_speed_10m_rolling_std_6h",
+      "mean_abs_shap": 0.7885
+    },
+    {
+      "rank": 107,
+      "feature": "wind_speed_10m_lag_12h",
+      "mean_abs_shap": 0.7789
+    },
+    {
+      "rank": 108,
+      "feature": "wind_speed_10m_lag_24h",
+      "mean_abs_shap": 0.7598
+    },
+    {
+      "rank": 109,
+      "feature": "wind_speed_10m_lag_1h",
+      "mean_abs_shap": 0.5813
+    },
+    {
+      "rank": 110,
+      "feature": "wind_speed_10m_lag_6h",
+      "mean_abs_shap": 0.5687
+    },
+    {
+      "rank": 111,
+      "feature": "wind_dir_cos",
+      "mean_abs_shap": 0.5091
+    },
+    {
+      "rank": 112,
+      "feature": "wind_speed_10m_lag_3h",
+      "mean_abs_shap": 0.473
+    },
+    {
+      "rank": 113,
+      "feature": "epa_aqi_diff_1h",
+      "mean_abs_shap": 0.3698
+    },
+    {
+      "rank": 114,
+      "feature": "precipitation",
+      "mean_abs_shap": 0.1394
+    }
+  ],
+  "milestone_horizon_rankings": {
+    "h1": {
+      "specialist_type": "LightGBM",
+      "persistence_mean_abs": 0.0,
+      "top_10": [
+        {
+          "rank": 1,
+          "feature": "pm2_5",
+          "mean_abs_shap": 146.8535
+        },
+        {
+          "rank": 2,
+          "feature": "pm10",
+          "mean_abs_shap": 22.315
+        },
+        {
+          "rank": 3,
+          "feature": "epa_aqi",
+          "mean_abs_shap": 22.0775
+        },
+        {
+          "rank": 4,
+          "feature": "pm2_5_diff_1h",
+          "mean_abs_shap": 6.9219
+        },
+        {
+          "rank": 5,
+          "feature": "hour_sin",
+          "mean_abs_shap": 6.7407
+        },
+        {
+          "rank": 6,
+          "feature": "stagnation_index",
+          "mean_abs_shap": 6.4545
+        },
+        {
+          "rank": 7,
+          "feature": "epa_aqi_diff_1h",
+          "mean_abs_shap": 3.0571
+        },
+        {
+          "rank": 8,
+          "feature": "so2",
+          "mean_abs_shap": 2.4811
+        },
+        {
+          "rank": 9,
+          "feature": "pm2_5_rolling_min_24h",
+          "mean_abs_shap": 2.2767
+        },
+        {
+          "rank": 10,
+          "feature": "epa_aqi_rolling_min_24h",
+          "mean_abs_shap": 1.2514
+        }
+      ]
+    },
+    "h6": {
+      "specialist_type": "LightGBM",
+      "persistence_mean_abs": 0.0,
+      "top_10": [
+        {
+          "rank": 1,
+          "feature": "pm2_5_rolling_mean_24h",
+          "mean_abs_shap": 27.5016
+        },
+        {
+          "rank": 2,
+          "feature": "pm2_5",
+          "mean_abs_shap": 26.2613
+        },
+        {
+          "rank": 3,
+          "feature": "stagnation_index",
+          "mean_abs_shap": 26.0272
+        },
+        {
+          "rank": 4,
+          "feature": "pm2_5_rolling_mean_12h",
+          "mean_abs_shap": 20.4618
+        },
+        {
+          "rank": 5,
+          "feature": "so2",
+          "mean_abs_shap": 16.7643
+        },
+        {
+          "rank": 6,
+          "feature": "pm2_5_rolling_min_24h",
+          "mean_abs_shap": 13.1153
+        },
+        {
+          "rank": 7,
+          "feature": "pm2_5_rolling_mean_6h",
+          "mean_abs_shap": 12.2754
+        },
+        {
+          "rank": 8,
+          "feature": "epa_aqi_rolling_mean_24h",
+          "mean_abs_shap": 11.8382
+        },
+        {
+          "rank": 9,
+          "feature": "temperature_2m_rolling_std_12h",
+          "mean_abs_shap": 9.0445
+        },
+        {
+          "rank": 10,
+          "feature": "hour_sin",
+          "mean_abs_shap": 8.5795
+        }
+      ]
+    },
+    "h12": {
+      "specialist_type": "Ridge",
+      "persistence_mean_abs": 0.0,
+      "top_10": [
+        {
+          "rank": 1,
+          "feature": "pm10",
+          "mean_abs_shap": 130.1358
+        },
+        {
+          "rank": 2,
+          "feature": "pm10_lag_12h",
+          "mean_abs_shap": 96.0917
+        },
+        {
+          "rank": 3,
+          "feature": "pm10_lag_1h",
+          "mean_abs_shap": 82.6044
+        },
+        {
+          "rank": 4,
+          "feature": "temperature_2m_rolling_mean_24h",
+          "mean_abs_shap": 72.4261
+        },
+        {
+          "rank": 5,
+          "feature": "temperature_2m_rolling_mean_6h",
+          "mean_abs_shap": 70.0784
+        },
+        {
+          "rank": 6,
+          "feature": "pm2_5_lag_12h",
+          "mean_abs_shap": 68.2598
+        },
+        {
+          "rank": 7,
+          "feature": "co",
+          "mean_abs_shap": 55.5851
+        },
+        {
+          "rank": 8,
+          "feature": "temperature_2m_lag_6h",
+          "mean_abs_shap": 47.0588
+        },
+        {
+          "rank": 9,
+          "feature": "surface_pressure_lag_6h",
+          "mean_abs_shap": 28.2432
+        },
+        {
+          "rank": 10,
+          "feature": "pm2_5_rolling_mean_24h",
+          "mean_abs_shap": 26.8719
+        }
+      ]
+    },
+    "h24": {
+      "specialist_type": "Ridge",
+      "persistence_mean_abs": 0.0,
+      "top_10": [
+        {
+          "rank": 1,
+          "feature": "pm10",
+          "mean_abs_shap": 193.7258
+        },
+        {
+          "rank": 2,
+          "feature": "pm10_lag_1h",
+          "mean_abs_shap": 103.526
+        },
+        {
+          "rank": 3,
+          "feature": "surface_pressure_lag_3h",
+          "mean_abs_shap": 31.3863
+        },
+        {
+          "rank": 4,
+          "feature": "temperature_2m_rolling_mean_12h",
+          "mean_abs_shap": 30.5081
+        },
+        {
+          "rank": 5,
+          "feature": "epa_aqi_rolling_mean_6h",
+          "mean_abs_shap": 28.3871
+        },
+        {
+          "rank": 6,
+          "feature": "month_sin",
+          "mean_abs_shap": 21.3059
+        },
+        {
+          "rank": 7,
+          "feature": "pm2_5_rolling_mean_6h",
+          "mean_abs_shap": 21.2449
+        },
+        {
+          "rank": 8,
+          "feature": "co",
+          "mean_abs_shap": 19.93
+        },
+        {
+          "rank": 9,
+          "feature": "thermal_moisture_index",
+          "mean_abs_shap": 19.6682
+        },
+        {
+          "rank": 10,
+          "feature": "pm2_5",
+          "mean_abs_shap": 18.9252
+        }
+      ]
+    },
+    "h48": {
+      "specialist_type": "Ridge+Persistence",
+      "persistence_mean_abs": 21.0496,
+      "top_10": [
+        {
+          "rank": 1,
+          "feature": "pm10",
+          "mean_abs_shap": 180.2733
+        },
+        {
+          "rank": 2,
+          "feature": "pm10_lag_1h",
+          "mean_abs_shap": 115.7136
+        },
+        {
+          "rank": 3,
+          "feature": "pm2_5_rolling_mean_6h",
+          "mean_abs_shap": 37.3004
+        },
+        {
+          "rank": 4,
+          "feature": "surface_pressure_lag_3h",
+          "mean_abs_shap": 31.7886
+        },
+        {
+          "rank": 5,
+          "feature": "pm2_5_rolling_mean_24h",
+          "mean_abs_shap": 30.8117
+        },
+        {
+          "rank": 6,
+          "feature": "co",
+          "mean_abs_shap": 30.5723
+        },
+        {
+          "rank": 7,
+          "feature": "month_sin",
+          "mean_abs_shap": 30.4288
+        },
+        {
+          "rank": 8,
+          "feature": "surface_pressure_lag_6h",
+          "mean_abs_shap": 29.001
+        },
+        {
+          "rank": 9,
+          "feature": "epa_aqi_rolling_mean_24h",
+          "mean_abs_shap": 28.1635
+        },
+        {
+          "rank": 10,
+          "feature": "thermal_moisture_index",
+          "mean_abs_shap": 25.274
+        }
+      ]
+    },
+    "h72": {
+      "specialist_type": "Ridge+Persistence",
+      "persistence_mean_abs": 71.5686,
+      "top_10": [
+        {
+          "rank": 1,
+          "feature": "pm10",
+          "mean_abs_shap": 84.2983
+        },
+        {
+          "rank": 2,
+          "feature": "pm10_lag_1h",
+          "mean_abs_shap": 60.5354
+        },
+        {
+          "rank": 3,
+          "feature": "month_sin",
+          "mean_abs_shap": 25.9348
+        },
+        {
+          "rank": 4,
+          "feature": "co",
+          "mean_abs_shap": 24.4
+        },
+        {
+          "rank": 5,
+          "feature": "thermal_moisture_index",
+          "mean_abs_shap": 22.2017
+        },
+        {
+          "rank": 6,
+          "feature": "pm2_5_rolling_mean_12h",
+          "mean_abs_shap": 21.496
+        },
+        {
+          "rank": 7,
+          "feature": "surface_pressure_lag_3h",
+          "mean_abs_shap": 21.0317
+        },
+        {
+          "rank": 8,
+          "feature": "pm2_5_lag_6h",
+          "mean_abs_shap": 19.8952
+        },
+        {
+          "rank": 9,
+          "feature": "surface_pressure_lag_6h",
+          "mean_abs_shap": 19.5246
+        },
+        {
+          "rank": 10,
+          "feature": "pm2_5_rolling_mean_24h",
+          "mean_abs_shap": 19.4139
+        }
+      ]
+    }
+  }
+}

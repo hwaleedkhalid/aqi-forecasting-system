@@ -17,6 +17,7 @@ import numpy as np
 
 from src.config import MODELS_DIR
 from src.feature_pipeline.aqi_calculator import get_aqi_category
+from src.inference.runtime_resolver import RuntimeAssetResolver
 from src.logger import logger
 
 # Official US EPA Health Advisories by Category
@@ -33,14 +34,20 @@ HEALTH_ADVISORIES: dict[str, str] = {
 class AQIPostProcessor:
     """Enriches raw AQI predictions with domain metadata and empirical error intervals."""
 
-    def __init__(self, intervals_path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        intervals_path: Path | str | None = None,
+        resolver: RuntimeAssetResolver | None = None,
+    ) -> None:
         """Initialize post-processor and load empirical error intervals.
 
         Args:
-            intervals_path: Path to empirical_error_intervals.json (default: data/models/walk_forward/empirical_error_intervals.json).
+            intervals_path: Path to empirical_error_intervals.json (default from RuntimeAssetResolver).
+            resolver: Optional RuntimeAssetResolver instance.
         """
+        self.resolver = resolver or RuntimeAssetResolver()
         self.intervals_path = Path(
-            intervals_path or MODELS_DIR / "walk_forward" / "empirical_error_intervals.json"
+            intervals_path or self.resolver.get_error_intervals_path()
         )
         self.q10: list[float] = []
         self.q90: list[float] = []
