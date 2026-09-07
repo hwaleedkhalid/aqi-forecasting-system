@@ -57,7 +57,7 @@ API_RATE_LIMIT_DELAY: float = 1.0  # seconds between batch requests
 # =============================================================================
 HOPSWORKS_API_KEY: str = os.getenv("HOPSWORKS_API_KEY", "")
 HOPSWORKS_PROJECT: str = os.getenv("HOPSWORKS_PROJECT", os.getenv("HOPSWORKS_PROJECT_NAME", "pearls_aqi_predictor"))
-HOPSWORKS_HOST: str = os.getenv("HOPSWORKS_HOST", "c.app.hopsworks.ai")
+HOPSWORKS_HOST: str = os.getenv("HOPSWORKS_HOST", "eu-west.cloud.hopsworks.ai")
 HOPSWORKS_FEATURE_GROUP_NAME: str = "aqi_weather_features_v2"
 HOPSWORKS_FEATURE_GROUP_VERSION: int = 1
 HOPSWORKS_FEATURE_VIEW_NAME: str = "aqi_forecast_view"

@@ -36,26 +36,39 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-feature-pipeline.txt
 
-      - name: Validate API Key on Live Runs
+      - name: Validate Secrets on Live Runs
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
         run: |
           if [ -z "$OPENWEATHER_API_KEY" ]; then
             echo "::error::OPENWEATHER_API_KEY secret is required for live scheduled feature pipeline."
             exit 1
           fi
+          if [ -z "$HOPSWORKS_API_KEY" ]; then
+            echo "::error::HOPSWORKS_API_KEY secret is required for live scheduled feature pipeline."
+            exit 1
+          fi
+          if [ -z "$HOPSWORKS_PROJECT" ]; then
+            echo "::error::HOPSWORKS_PROJECT secret is required for live scheduled feature pipeline."
+            exit 1
+          fi
 
-      - name: Run Ingestion & Validation
+      - name: Run Ingestion, Canonical Feature Construction & Hopsworks Publication
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
+          HOPSWORKS_HOST: "eu-west.cloud.hopsworks.ai"
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python -m src.feature_pipeline.run_hourly_ingestion --dry-run
           else
-            python -m src.feature_pipeline.run_hourly_ingestion
+            python -m src.feature_pipeline.run_hourly_ingestion --live
           fi
 
       - name: Upload Ingestion Snapshot Artifact

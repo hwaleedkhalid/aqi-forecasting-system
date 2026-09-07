@@ -20,6 +20,7 @@ data/processed/
 data/models/
 data/predictions/
 data/logs/
+data/snapshots/
 data/cached_predictions.json
 
 # Whitelist versioned runtime deployment assets

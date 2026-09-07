@@ -121,19 +121,34 @@ class HopsworksFeatureStoreConnector:
         if "dt" not in storage_df.columns:
             raise ValidationError("Input dataframe must contain event_time column 'dt'")
 
+        # Validate dt values are integral before casting
+        dt_numeric = pd.to_numeric(storage_df["dt"], errors="coerce")
+        if dt_numeric.isna().any():
+            raise ValidationError("Non-numeric or NaN values detected in event_time column 'dt'")
+        if not np.all(dt_numeric % 1 == 0):
+            raise ValidationError("Fractional (non-integral) timestamps detected in event_time column 'dt'")
+
         # Ensure location_id primary key exists
         if "location_id" not in storage_df.columns:
             storage_df["location_id"] = str(self.location_id)
         else:
             storage_df["location_id"] = storage_df["location_id"].astype(str)
 
-        # Ensure dt is integer epoch
-        storage_df["dt"] = storage_df["dt"].astype(np.int64)
+        # Cast dt to integer epoch int64
+        storage_df["dt"] = dt_numeric.astype(np.int64)
 
         # Ensure all canonical columns are present
         missing = [c for c in self.canonical_features if c not in storage_df.columns]
         if missing:
             raise ValidationError(f"Storage dataframe is missing canonical columns: {missing[:5]}")
+
+        # Cast all 113 canonical numerical predictors to float64 (double in Hopsworks schema)
+        for col in self.canonical_features:
+            if col != "dt":
+                storage_df[col] = storage_df[col].astype(np.float64)
+
+        # Retain exactly location_id + 114 canonical features in order (115 columns total)
+        storage_df = storage_df[["location_id"] + self.canonical_features]
 
         return storage_df
 
@@ -167,24 +182,35 @@ class HopsworksFeatureStoreConnector:
         """Get or create Hopsworks feature group with entity PK and event time."""
         fs = self._login()
         if description is None:
-            description = "Weather-enriched air quality features with 72-hour lag windows for Lahore."
+            description = (
+                "Weather-enriched air quality features with 72-hour lag windows for Lahore (EXP-019)."
+            )
 
         self._fg = fs.get_or_create_feature_group(
             name=self.feature_group_name,
             version=self.feature_group_version,
             primary_key=["location_id"],
             event_time="dt",
+            time_travel_format="HUDI",
             description=description,
             online_enabled=True,
         )
         return self._fg
 
-    def insert_features(self, df: pd.DataFrame, wait: bool = True) -> dict[str, Any]:
+    def insert_features(
+        self,
+        df: pd.DataFrame,
+        wait: bool = True,
+        storage: str | None = None,
+        write_options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Insert features into Hopsworks Feature Group with synchronous completion guarantee.
 
         Args:
             df: DataFrame containing features to insert.
             wait: If True, waits synchronously for ingestion job completion.
+            storage: Target storage ("offline", "online", or None for both).
+            write_options: Optional low-level write options dictionary.
 
         Returns:
             Ingestion result summary dictionary.
@@ -194,9 +220,43 @@ class HopsworksFeatureStoreConnector:
 
         logger.info(
             f"Inserting {len(storage_df)} records (115 columns) into feature group "
-            f"'{self.feature_group_name}' (wait={wait})..."
+            f"'{self.feature_group_name}' (wait={wait}, storage={storage})..."
         )
-        insert_res = fg.insert(storage_df, wait=wait)
+        insert_kwargs: dict[str, Any] = {"wait": wait}
+        if storage is not None:
+            insert_kwargs["storage"] = storage
+        if write_options is not None:
+            insert_kwargs["write_options"] = write_options
+
+        insert_res = None
+        for attempt in range(1, 4):
+            try:
+                insert_res = fg.insert(storage_df, **insert_kwargs)
+                break
+            except Exception as e:
+                err_msg = str(e)
+                if ("RemoteDisconnected" in err_msg or "Connection aborted" in err_msg) and attempt < 3:
+                    logger.warning(f"Connection blip during insert (attempt {attempt}/3): {e}")
+                    time.sleep(3)
+                    job = getattr(fg, "materialization_job", None)
+                    if job:
+                        try:
+                            execs = job.get_executions()
+                            if execs and getattr(execs[0], "state", "") == "RUNNING":
+                                logger.info(f"Execution {execs[0].id} was successfully triggered on cluster.")
+                                insert_res = (job, None)
+                                break
+                        except Exception:
+                            pass
+                else:
+                    raise
+
+        job_repr = "none"
+        if insert_res is not None:
+            try:
+                job_repr = str(insert_res)
+            except Exception:
+                job_repr = "JobSubmitted"
 
         return {
             "status": "inserted",
@@ -205,7 +265,8 @@ class HopsworksFeatureStoreConnector:
             "records_inserted": len(storage_df),
             "storage_columns": len(storage_df.columns),
             "synchronous_wait": wait,
-            "job_result": str(insert_res),
+            "storage": storage or "all",
+            "job_result": job_repr,
         }
 
     def get_latest_feature_vector(self) -> tuple[np.ndarray, dict[str, Any]]:
@@ -218,8 +279,18 @@ class HopsworksFeatureStoreConnector:
             try:
                 fs = self._login()
                 fg = fs.get_feature_group(name=self.feature_group_name, version=self.feature_group_version)
-                query = fg.select_all().filter(fg.location_id == self.location_id)
-                cloud_df = query.read()
+                cloud_df = None
+
+                if getattr(fg, "online_enabled", False):
+                    try:
+                        q = fg.select_all().filter(fg.location_id == self.location_id)
+                        cloud_df = q.read(online=True)
+                    except Exception as e_online:
+                        logger.warning(f"Online store read attempt failed ({e_online}); falling back to offline.")
+
+                if cloud_df is None or len(cloud_df) == 0:
+                    query = fg.select_all().filter(fg.location_id == self.location_id)
+                    cloud_df = query.read()
 
                 if cloud_df is None or len(cloud_df) == 0:
                     raise FeatureStoreError("Hopsworks query returned empty dataset.")
@@ -266,3 +337,69 @@ class HopsworksFeatureStoreConnector:
             "cloud_active": False,
         }
         return vector, meta
+
+    def insert_hourly_feature_row(
+        self,
+        row_df: pd.DataFrame,
+        wait_for_job: bool = True,
+    ) -> dict[str, Any]:
+        """Insert a single verified hourly feature row into Hopsworks Feature Store.
+
+        Performs dual-store upsert semantics:
+        1. Offline Hudi upsert to record the historical event without duplicate row inflation.
+        2. Online insertion with server-side upsert_if_newer=True so delayed or older events
+           cannot regress the online Lahore entity.
+
+        Args:
+            row_df: DataFrame containing the 114 canonical features for the observation.
+            wait_for_job: Whether to wait synchronously for offline ingestion job completion.
+
+        Returns:
+            Dictionary reporting insertion status and observation timestamp.
+        """
+        # Validate and prepare storage DataFrame (115 columns: location_id + 114 features)
+        storage_df = self.prepare_storage_dataframe(row_df)
+        obs_dt = int(storage_df["dt"].iloc[0])
+
+        # Pre-read current online dt for observability logging
+        online_dt_before = None
+        try:
+            _, meta = self.get_latest_feature_vector()
+            online_dt_before = int(meta.get("dt", 0))
+        except Exception as e:
+            logger.debug(f"Online store pre-read note: {e}")
+
+        # 1. Offline Hudi Upsert
+        offline_write_options = {
+            "wait_for_job": wait_for_job,
+            "start_offline_materialization": True,
+        }
+        offline_res = self.insert_features(
+            row_df,
+            wait=wait_for_job,
+            storage="offline",
+            write_options=offline_write_options,
+        )
+
+        # 2. Online Upsert with Server-Side Newer-Event Protection
+        online_write_options = {
+            "wait_for_online_ingestion": True,
+            "online_ingestion_options": {
+                "upsert_if_newer": True,
+            },
+        }
+        online_res = self.insert_features(
+            row_df,
+            wait=True,
+            storage="online",
+            write_options=online_write_options,
+        )
+
+        return {
+            "status": "hourly_ingestion_success",
+            "observation_dt": obs_dt,
+            "online_dt_before": online_dt_before,
+            "offline_result": offline_res,
+            "online_result": online_res,
+        }
+

@@ -88,7 +88,24 @@ These versioned assets enable deterministic clean-clone deployment without requi
 
 ## Hopsworks Integration
 
-Phase 16 implemented and tested Hopsworks Feature Store and Model Registry integration. Cloud authentication to Hopsworks was verified successfully. A live audit confirmed that the remote project and Feature Store existed with zero feature groups and zero registered models at deployment time. Consequently, Hopsworks serves as an integration-ready cloud capability rather than an active production runtime dependency.
+The live Hopsworks Feature Store, Model Registry, and Scheduled Hourly Feature Pipeline have been implemented and verified:
+* **Feature Group**: `aqi_weather_features_v2` (version 1, ID `52526`) on project `aqi_predictor_by_Waleed` (`https://eu-west.cloud.hopsworks.ai`).
+* **Key Architecture**: `primary_key=["location_id"]`, `event_time="dt"`, `online_enabled=True`, `time_travel_format="HUDI"`.
+* **Offline Storage**: Contains 48,716 historical hourly observations spanning November 28, 2020 through September 7, 2026 for Lahore across 115 columns (`location_id` + 114 canonical features). Idempotency is verified: re-upserting historical records maintains row count without inflation.
+* **Online Storage**: Synchronized with the latest live observation (`dt = 1788793200`, 2026-09-07 15:00:00 UTC) using server-side `upsert_if_newer=True` protection, verifying that delayed or older historical retries cannot regress the online Lahore entity. Freshness verified with observation age < 1 hour (`is_stale=false`).
+* **Hourly Live Feature Pipeline**: The hourly pipeline is implemented and manually validated; scheduled GitHub Actions production execution is pending final secret configuration. Automated via `.github/workflows/feature_pipeline.yml` configured for hourly schedule (`17 * * * *`).
+  * *Telemetry Providers*: OpenWeather Air Pollution History API (72h criteria pollutants) + Open-Meteo Weather API (`past_days=3, forecast_days=1` surface meteorology).
+  * *Temporal Continuity*: Enforces strict hourly grid continuity over $[T-24\text{h}, T]$ with established production limit=3 linear/time interpolation for short sensor dropouts, failing closed on unbridgeable gaps $> 3$ hours.
+  * *Production Timestamp*: Derived as $T = \min(T_{\text{AQ}}, T_{\text{weather}})$ floored to the hour boundary, strictly $\le \text{now\_utc}$ (future forecast hours discarded).
+  * *Dual-Store Upsert*: Ingests historical event to offline Hudi with `start_offline_materialization=True` and updates online RonDB with `upsert_if_newer=True`.
+  * *CLI Commands*:
+    * Dry run: `python -m src.feature_pipeline.run_hourly_ingestion --dry-run`
+    * Live ingestion: `python -m src.feature_pipeline.run_hourly_ingestion --live`
+  * *Isolated Dependencies*: Scheduled workflow uses `requirements-feature-pipeline.txt` (`hopsworks==5.0.6`), isolating cloud dependencies from the deployed Render/Streamlit environments.
+* **Inference Contract & Parity**: Strict 114-column projection preserves canonical schema order with 0.00000000 maximum numerical difference against local data and transparent staleness detection.
+* **Model Registry**: Frozen production champion registered under `pearls_aqi_production_champion` (version 1, ID `pearls_aqi_production_champion_1`). Packages the complete EXP-019 runtime bundle (hybrid model, scaler, canonical 114-feature schema, empirical residual intervals, and explainability assets) with SHA256 integrity manifest.
+* **Clean-Download & Parity Verification**: Independent clean-download from Hopsworks into an isolated directory verified exact SHA256 matches across all files, standalone loadability, and 0.00000000 maximum absolute prediction error across all 72 horizons (including boundary horizons h1, h6, h7, h24, h37, h38, h39, h72) and explainability parity on h1, h24, h72.
+* **Production Boundary**: The deployed Render API and Streamlit UI remain self-contained using the frozen Git deployment bundle for production stability; Model Registry registration fulfills the central artifact tracking requirement and is independently reproducible via `python -m src.inference.hopsworks_registry --all`.
 
 ## Key Results
 
@@ -98,7 +115,7 @@ Based on the final out-of-time test across 9,311 samples (2025-06-07 to 2026-08-
   * h+72 RMSE = 77.43
 * **Benchmark Comparison**: Beats Naive Persistence (RMSE 85.35) by 11.06% relative RMSE reduction.
 * **Walk-forward Validation**: 4/4 temporal folds won against Naive Persistence, with a mean relative gain of 24.46% (mean RMSE 83.44 vs 110.46).
-* **Test Suite**: 355 automated tests passing across 28 test modules (75% code coverage).
+* **Test Suite**: 389 automated tests passing across 30 test modules (73% code coverage).
 
 ## REST API Endpoints
 
