@@ -38,6 +38,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Seed Production Model From Runtime Assets
+        run: |
+          mkdir -p data/models
+          cp -n data/runtime/production/production_hybrid_model.joblib data/models/production_hybrid_model.joblib || true
+
       - name: Record Production Model Hash (Immutability Guarantee)
         run: |
           sha256sum data/models/production_hybrid_model.joblib > /tmp/prod_model_hash_before.txt
