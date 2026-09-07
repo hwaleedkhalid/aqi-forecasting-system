@@ -1,7 +1,7 @@
 {
   "schema_version": "v2_weather_enriched",
   "feature_count": 114,
-  "schema_sha256": "d83bf380acdbaf935f813c58554581a0b58aa3518ebd1fe5b848df853dabb4da",
+  "schema_sha256": "38a5fdea89b0c5ed9b4e233ab1c46de1837a4dccdfccf77e58b74d06d5348538",
   "input_observed_at": "2026-08-31 07:00:00+00:00",
   "source": "bootstrap",
   "current_aqi": 100.0,

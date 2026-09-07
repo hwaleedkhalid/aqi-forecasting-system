@@ -29,14 +29,21 @@ RUNTIME_BOOTSTRAP_DIR = RUNTIME_DIR / "bootstrap"
 
 
 def compute_file_sha256(file_path: Path) -> str:
-    """Compute SHA256 hexadecimal digest of a file."""
+    """Compute SHA256 hexadecimal digest of a file (normalizing JSON text to LF)."""
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
+    
+    # For JSON text files, normalize CRLF to LF to guarantee cross-OS invariance
+    if file_path.suffix.lower() == ".json":
+        text = file_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
     hasher = hashlib.sha256()
     with open(file_path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
 
 
 class RuntimeAssetResolver:

@@ -14,7 +14,7 @@
   "files": {
     "production_hybrid_model.joblib": "f51d2eff53b8eadaf7ddb615f1dc76aeed30526038c79cc68ae758e52d8412ee",
     "feature_scaler_v2_weather.joblib": "9ce7e9fcc4fe65c2ac3b52c48c1215622112c9e3827d2c42d9d2c36fa246f063",
-    "feature_schema_v2_weather.json": "d83bf380acdbaf935f813c58554581a0b58aa3518ebd1fe5b848df853dabb4da",
-    "empirical_error_intervals.json": "81a66f468011daca47daccd879b525bd72a02558d07046b531f33e170b7e4b68"
+    "feature_schema_v2_weather.json": "38a5fdea89b0c5ed9b4e233ab1c46de1837a4dccdfccf77e58b74d06d5348538",
+    "empirical_error_intervals.json": "dba4571ebe0599aac7cef8c8982e88b7a7b6f5d656eeb318de960f40483dab83"
   }
 }
