@@ -207,6 +207,9 @@ class TestHopsworksBackfillRunner:
             audit_historical_dataset(dupe_df, load_canonical_feature_names())
 
     def test_backfill_runner_dry_run_passes(self):
+        from src.config import PROCESSED_DATA_DIR
+        if not (PROCESSED_DATA_DIR / "features_v2_weather.csv").exists():
+            pytest.skip("Historical features CSV not present in repo checkout")
         from src.feature_pipeline.backfill_hopsworks import HopsworksBackfillRunner
 
         runner = HopsworksBackfillRunner(chunk_size=10000)

@@ -326,19 +326,31 @@ class HopsworksFeatureStoreConnector:
 
         # Local fallback execution
         local_csv = PROCESSED_DATA_DIR / "features_v2_weather.csv"
-        if not local_csv.exists():
-            raise FileNotFoundError(f"Local feature file not found at {local_csv}")
-
-        local_df = pd.read_csv(local_csv)
-        latest_local = local_df.iloc[[-1]]
-        projected_df = self.project_inference_features(latest_local)
-        vector = projected_df.values.astype(np.float64)
+        if local_csv.exists():
+            local_df = pd.read_csv(local_csv)
+            latest_local = local_df.iloc[[-1]]
+            projected_df = self.project_inference_features(latest_local)
+            vector = projected_df.values.astype(np.float64)
+            obs_dt = int(latest_local["dt"].iloc[0]) if "dt" in latest_local.columns else 0
+            source_desc = "Local CSV Storage (Fallback)"
+        else:
+            bootstrap_json = RUNTIME_DIR / "bootstrap" / "latest_feature_vector.json"
+            if bootstrap_json.exists():
+                with open(bootstrap_json, "r", encoding="utf-8") as f:
+                    bdata = json.load(f)
+                bfeats = bdata.get("features", {})
+                canonical = load_canonical_feature_names()
+                vector = np.array([[bfeats.get(c, 0.0) for c in canonical]], dtype=np.float64)
+                obs_dt = 1788793200
+                source_desc = "Local Bootstrap Storage (Fallback)"
+            else:
+                raise FileNotFoundError(f"Local feature file not found at {local_csv}")
 
         meta = {
-            "source": "Local CSV Storage (Fallback)",
+            "source": source_desc,
             "feature_group": "local_features_v2_weather.csv",
             "location_id": self.location_id,
-            "dt": int(latest_local["dt"].iloc[0]) if "dt" in latest_local.columns else 0,
+            "dt": obs_dt,
             "feature_count": 114,
             "cloud_active": False,
         }
