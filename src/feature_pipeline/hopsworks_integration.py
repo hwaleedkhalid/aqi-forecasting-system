@@ -359,7 +359,7 @@ class HopsworksFeatureStoreConnector:
     def insert_hourly_feature_row(
         self,
         row_df: pd.DataFrame,
-        wait_for_job: bool = True,
+        wait_for_job: bool = False,
     ) -> dict[str, Any]:
         """Insert a single verified hourly feature row into Hopsworks Feature Store.
 
@@ -408,7 +408,7 @@ class HopsworksFeatureStoreConnector:
         }
         online_res = self.insert_features(
             row_df,
-            wait=True,
+            wait=False,
             storage="online",
             write_options=online_write_options,
         )

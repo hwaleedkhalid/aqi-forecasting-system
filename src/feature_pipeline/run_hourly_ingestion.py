@@ -446,7 +446,7 @@ def run_hourly_pipeline(
         is_stale = age_seconds > (3 * 3600)
 
         logger.info(f"Publishing observation T={obs_dt} to Hopsworks Feature Store...")
-        hw_result = conn.insert_hourly_feature_row(canonical_row, wait_for_job=True)
+        hw_result = conn.insert_hourly_feature_row(canonical_row, wait_for_job=False)
 
         report = {
             "status": "live_ingestion_success",
