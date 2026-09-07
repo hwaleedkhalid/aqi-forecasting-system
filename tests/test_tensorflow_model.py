@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("tensorflow")
+
 from src.exceptions import ModelTrainingError
 from src.models.tensorflow_model import TensorFlowAQIModel
 

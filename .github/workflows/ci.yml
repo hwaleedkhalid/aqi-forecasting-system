@@ -28,7 +28,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest pytest-cov pyyaml
+          pip install -r requirements.txt -r src/dashboard/requirements.txt pytest pytest-cov pyyaml tensorflow-cpu
 
       - name: Run Test Suite with Coverage (>=70% threshold)
         run: |

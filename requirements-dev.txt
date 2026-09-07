@@ -1,9 +1,7 @@
-﻿# Development, Offline Baselines & Testing Dependencies
+# Development, Offline Baselines & Testing Dependencies
 -r requirements.txt
-tensorflow>=2.13.0
-hopsworks>=3.4.0,<4.0.0
-nest_asyncio>=1.6.0
-streamlit>=1.28.0
-plotly>=5.18.0
+-r src/dashboard/requirements.txt
 pytest>=7.4.0
 pytest-cov>=4.1.0
+pyyaml>=6.0
+tensorflow-cpu>=2.13.0
