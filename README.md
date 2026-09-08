@@ -128,7 +128,7 @@ Based on the final out-of-time test across 9,311 samples (2025-06-07 to 2026-08-
   * h+72 RMSE = 77.43
 * **Benchmark Comparison**: Beats Naive Persistence (RMSE 85.35) by 11.06% relative RMSE reduction.
 * **Walk-forward Validation**: 4/4 temporal folds won against Naive Persistence, with a mean relative gain of 24.46% (mean RMSE 83.44 vs 110.46).
-* **Test Suite**: 418 automated tests passing across 33 test modules (73.43% code coverage).
+* **Test Suite**: 458 automated tests passing across 35 test modules (74.00% code coverage).
 
 
 ## REST API Endpoints
@@ -144,6 +144,29 @@ The Flask backend is served under the `/api` route:
 
 * **Multi-Horizon SHAP**: TreeExplainer for h1–6, LinearExplainer for h7–37, and weighted Ridge attribution with explicitly separated persistence contribution for h38–72. SHAP reflects model feature attribution, not causal environmental mechanisms.
 * **Empirical Prediction Error Intervals**: Residual quantiles (10th and 90th percentiles) derived from 8,636 out-of-fold walk-forward validation residuals. These represent empirical error ranges, not parametric confidence intervals.
+
+## High-Severity & Hazardous AQI Alert System
+
+The system implements a centralized, authoritative AQI alert classification and severity evaluation layer (`src/inference/alerting.py`):
+* **Single Source of Truth**: Evaluates alerts strictly through the path `numeric AQI -> get_aqi_category() -> category -> classify_category_alert()`. This guarantees 100% boundary consistency between EPA categories and normalized alert levels:
+  * Good (0–50): `none` / rank 0
+  * Moderate (51–100): `none` / rank 1
+  * Unhealthy for Sensitive Groups (101–150): `advisory` / rank 2
+  * Unhealthy (151–200): `warning` / rank 3
+  * Very Unhealthy (201–300): `severe` / rank 4
+  * Hazardous (301–500+): `hazardous` / rank 5 (extreme values >500 preserved unclipped)
+* **Authoritative Multi-Horizon Scanning**: Evaluates the full 72-hour forecast trajectory to detect:
+  * Peak AQI, horizon, and peak EPA category
+  * First threshold crossings: `first_advisory_horizon`, `first_unhealthy_horizon`, `first_very_unhealthy_horizon`, `first_hazardous_horizon` (with corresponding timestamps)
+  * Category-specific counts: `advisory_horizon_count`, `unhealthy_horizon_count`, `very_unhealthy_horizon_count`, `hazardous_horizon_count`, and `severe_or_higher_horizon_count`
+  * Tail risk auditing: `upper_interval_crosses_hazardous` triggers an uncertainty advisory if the 90th percentile empirical error bound reaches $\ge 301$ even when the expected forecast remains below the severe threshold.
+* **Prioritized Dashboard Banners**: Structured top-level hierarchy prevents contradictory notices:
+  1. Current Severe/Hazardous Observation Emergency Banner
+  2. Forecast Severe/Hazardous 72h Trajectory Banner
+  3. Stale Data Provenance Notice (rendered alongside severe alerts if data is historical)
+  4. Unhealthy Warning / Advisory Banners (if no higher tier is active)
+* **Domain Chart Boundaries**: Interactive 72-hour forecast visualization renders dashed category boundary lines at exact EPA levels: 151 (Unhealthy, red), 201 (Very Unhealthy, purple), and 301 (Hazardous, maroon).
+* **Backward Compatibility**: Preserves all legacy fields (`high_severity`, `hazardous`, `has_high_severity`, `has_hazardous`, `highest_alert_level`) alongside the enriched `alert` and `forecast_alert` contracts.
 
 ## Project Structure
 
