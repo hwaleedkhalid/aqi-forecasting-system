@@ -562,12 +562,12 @@ The candidate training runner (`src/training_pipeline/run_daily_candidate.py`) s
 
 #### Dynamic Recommendation Gate
 Under NO circumstances does the gate use EXP-019 out-of-time holdout RMSE (75.91) as a numeric threshold, because the candidate is evaluated on the pre-holdout development validation partition. The pipeline dynamically classifies the outcome into:
-* `retain_champion` (default): Candidate failed to strictly beat persistence across overall RMSE or milestone horizons (h1, h24, h72), failed to meet the $\ge 15\%$ relative improvement threshold, or exhibited material subset regressions on extreme AQI regimes (>200, >300).
-* `manual_review_recommended`: Candidate demonstrated statistically valid improvements over persistence on the same evaluation protocol, passed all stability invariants without extreme subset regressions, and merits offline inspection by the engineering team (under NO circumstances automatically promoted or deployed).
+* `retain_champion` (default): Candidate failed to strictly beat persistence across overall RMSE or milestone horizons (h1, h24, h72), failed to meet the $\ge 20.0\%$ quality improvement threshold (`meets_quality_threshold`), or exhibited material subset regressions on extreme AQI regimes (`extreme_gt200_ok`, `extreme_gt300_ok`).
+* `manual_review_recommended`: Candidate demonstrated statistically valid improvements over persistence on the same evaluation protocol ($\ge 20.0\%$ improvement, beating persistence at h1, h24, h72), passed all stability invariants without extreme subset regressions, and merits offline inspection by the engineering team (under NO circumstances automatically promoted or deployed).
 
 ### 24.8 Controlled Live Training Run Results
 
-A complete live training run was executed against the live Hopsworks Feature Store using the clean backend environment (`candidate_family="ridge"`):
+A complete live training run was executed against the live Hopsworks Feature Store on GitHub Actions (Run [`34213609930`](https://github.com/hwaleedkhalid/aqi-forecasting-system/actions/runs/34213609930), Workflow Artifact `10050847367` `evaluation.json`, `candidate_family="ridge"`, $\alpha=10.0$):
 
 | Metric / Dimension | Candidate Model (`ridge`, $\alpha=10.0$) | Naive Persistence Baseline | Relative Improvement |
 | :--- | :--- | :--- | :--- |
@@ -575,16 +575,16 @@ A complete live training run was executed against the live Hopsworks Feature Sto
 | **Overall MAE** | **63.54** | 81.79 | **+22.31% gain** |
 | **Overall R²** | **0.5440** | 0.1155 | **+0.4285 delta** |
 | **h+1 RMSE** | **55.05** | 68.03 | **+19.08% gain** |
-| **h+6 RMSE** | **67.24** | 87.05 | **+22.76% gain** |
+| **h+6 RMSE** | **72.18** | 100.94 | **+28.50% gain** |
 | **h+24 RMSE** | **84.14** | 105.76 | **+20.44% gain** |
-| **h+48 RMSE** | **91.07** | 122.95 | **+25.93% gain** |
-| **h+72 RMSE** | **94.06** | 130.77 | **+28.07% gain** |
-| **Extreme AQI (>200) RMSE** | **110.32** (n=3,812) | 162.45 | **+32.09% gain** |
-| **Extreme AQI (>300) RMSE** | **128.51** (n=1,104) | 194.22 | **+33.83% gain** |
+| **h+48 RMSE** | **91.78** | 122.23 | **+24.91% gain** |
+| **h+72 RMSE** | **94.06** | 130.77 | **+28.08% gain** |
+| **Severe AQI (>200) RMSE** | **102.14** (n=262,312) | 140.83 | **+27.47% gain** |
+| **Hazardous AQI (>300) RMSE** | **118.67** (n=152,831) | 157.59 | **+24.70% gain** |
 
 * **Execution Runtime**: 50.01 seconds.
-* **Recommendation**: `manual_review_recommended` (comfortably beat persistence overall and across all milestone horizons on development validation without extreme regressions).
-* **Reference Comparison Note**: Candidate validation metrics (evaluating 2024–2025 pre-holdout validation data) cannot be directly compared to EXP-019 holdout test metrics (evaluating 2025–2026 out-of-time holdout data). They reflect separate temporal evaluation regimes.
+* **Recommendation**: `manual_review_recommended` (achieved 28.20% gain vs persistence exceeding $\ge 20.0\%$ threshold, beat persistence across h1, h24, h72 without extreme subset regressions on development validation).
+* **Reference Comparison Note**: Candidate validation metrics (evaluating 2024–2025 pre-holdout validation data) cannot be directly compared to EXP-019 holdout test metrics (evaluating 2025–2026 out-of-time holdout data: RMSE = 75.91, MAE = 53.55, R² = 0.4858). They reflect separate temporal evaluation regimes.
 
 ### 24.9 Candidate Artifact Isolation and SHA256 Integrity
 

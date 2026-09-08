@@ -291,9 +291,13 @@ class TestDailyCandidateTrainingRunner:
         assert "same_protocol_evaluation" in comparison
         assert comparison["comparable_evaluation_protocol"] is False
         assert "beats_persistence_overall" in comparison["same_protocol_evaluation"]
-        assert "meaningful_improvement_ge_15pct" in comparison["same_protocol_evaluation"]
-        assert "no_extreme_regression" in comparison["same_protocol_evaluation"]
+        assert "meets_quality_threshold" in comparison["same_protocol_evaluation"]
+        assert comparison["same_protocol_evaluation"]["quality_threshold_pct"] == 20.0
+        assert "extreme_gt200_ok" in comparison["same_protocol_evaluation"]
+        assert "extreme_gt300_ok" in comparison["same_protocol_evaluation"]
         # Invariant: EXP-019 holdout benchmarks are present only as reference
         assert "exp019_reference_benchmarks" in comparison
         assert comparison["exp019_reference_benchmarks"]["holdout_test"]["overall_rmse"] == 75.91
+        assert comparison["exp019_reference_benchmarks"]["holdout_test"]["overall_mae"] == 53.55
+        assert comparison["exp019_reference_benchmarks"]["holdout_test"]["overall_r2"] == 0.4858
 

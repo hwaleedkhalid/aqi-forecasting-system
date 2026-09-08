@@ -374,8 +374,8 @@ class DailyCandidateTrainingRunner:
         # Candidate merits manual review ONLY on same-protocol evidence:
         # 1. Candidate beats persistence overall (cand_rmse < baseline_rmse)
         # 2. Candidate beats persistence at milestone horizons h1, h24, and h72
-        # 3. Candidate achieves a meaningful relative improvement over persistence (>= 15%)
-        # 4. No material regression in AQI >200 / >300 subsets when sample counts are sufficient (>= 30)
+        # 3. Candidate achieves quality threshold vs persistence (pct_improvement_vs_baseline >= 20.0%)
+        # 4. No material regression in extreme AQI subsets (>200 and >300) when sample counts are sufficient (>= 30)
         # Under NO circumstances does the gate use EXP-019 out-of-time holdout RMSE (75.91)
         # because the candidate is evaluated on the pre-holdout development validation split.
         beats_persistence_overall = bool(cand_rmse < baseline_rmse)
@@ -388,35 +388,38 @@ class DailyCandidateTrainingRunner:
         beats_persistence_h72 = bool(
             candidate_eval["key_horizons"]["h72"]["rmse"] < baseline_eval["key_horizons"]["h72"]["rmse"]
         )
-        meaningful_improvement = bool(pct_improvement_vs_baseline >= 15.0)
+        # Strict same-protocol quality threshold: candidate must achieve >= 20.0% improvement over persistence
+        meets_quality_threshold = bool(pct_improvement_vs_baseline >= 20.0)
 
-        # Check for material regression on extreme subsets (>200 and >300) when sample count is sufficient (>= 30)
-        no_extreme_regression = True
-        extreme_regression_notes = []
-        for thresh_key, thresh_name in [("severe_gt200", "AQI > 200"), ("hazardous_gt300", "AQI > 300")]:
-            c_ext = candidate_eval["extreme_events"].get(thresh_key, {})
-            b_ext = baseline_eval["extreme_events"].get(thresh_key, {})
-            n_samples = c_ext.get("sample_count", 0)
-            if n_samples >= 30 and c_ext.get("rmse") is not None and b_ext.get("rmse") is not None:
-                if c_ext["rmse"] > b_ext["rmse"] * 1.05:
-                    no_extreme_regression = False
-                    extreme_regression_notes.append(
-                        f"{thresh_name} regression: candidate RMSE ({c_ext['rmse']}) > baseline RMSE ({b_ext['rmse']})"
-                    )
+        # Extreme-AQI regression checks (>200 and >300) when sample count is sufficient (>= 30)
+        c_ext_200 = candidate_eval["extreme_events"].get("severe_gt200", {})
+        b_ext_200 = baseline_eval["extreme_events"].get("severe_gt200", {})
+        n_200 = c_ext_200.get("sample_count", 0)
+        extreme_gt200_ok = True
+        if n_200 >= 30 and c_ext_200.get("rmse") is not None and b_ext_200.get("rmse") is not None:
+            extreme_gt200_ok = bool(c_ext_200["rmse"] <= b_ext_200["rmse"] * 1.05)
+
+        c_ext_300 = candidate_eval["extreme_events"].get("hazardous_gt300", {})
+        b_ext_300 = baseline_eval["extreme_events"].get("hazardous_gt300", {})
+        n_300 = c_ext_300.get("sample_count", 0)
+        extreme_gt300_ok = True
+        if n_300 >= 30 and c_ext_300.get("rmse") is not None and b_ext_300.get("rmse") is not None:
+            extreme_gt300_ok = bool(c_ext_300["rmse"] <= b_ext_300["rmse"] * 1.05)
 
         merits_manual_review = (
             beats_persistence_overall
             and beats_persistence_h1
             and beats_persistence_h24
             and beats_persistence_h72
-            and meaningful_improvement
-            and no_extreme_regression
+            and meets_quality_threshold
+            and extreme_gt200_ok
+            and extreme_gt300_ok
         )
 
         if merits_manual_review:
             recommendation = "manual_review_recommended"
             recommendation_reason = (
-                f"Candidate ({self.candidate_family}) achieved {pct_improvement_vs_baseline}% gain vs persistence, "
+                f"Candidate ({self.candidate_family}) achieved {pct_improvement_vs_baseline}% gain vs persistence (>= 20.0%), "
                 "beat persistence across h1, h24, h72 without extreme subset regressions on development validation. "
                 "Candidate merits manual human review (NO automatic promotion)."
             )
@@ -427,10 +430,16 @@ class DailyCandidateTrainingRunner:
                 reasons.append("did not beat persistence overall")
             if not (beats_persistence_h1 and beats_persistence_h24 and beats_persistence_h72):
                 reasons.append("failed to beat persistence across all key horizons (h1, h24, h72)")
-            if not meaningful_improvement:
-                reasons.append(f"improvement vs persistence ({pct_improvement_vs_baseline}%) below 15% threshold")
-            if not no_extreme_regression:
-                reasons.extend(extreme_regression_notes)
+            if not meets_quality_threshold:
+                reasons.append(f"improvement vs persistence ({pct_improvement_vs_baseline}%) below 20.0% threshold")
+            if not extreme_gt200_ok:
+                reasons.append(
+                    f"severe AQI >200 regression vs baseline (candidate RMSE {c_ext_200.get('rmse')} > baseline {b_ext_200.get('rmse')})"
+                )
+            if not extreme_gt300_ok:
+                reasons.append(
+                    f"hazardous AQI >300 regression vs baseline (candidate RMSE {c_ext_300.get('rmse')} > baseline {b_ext_300.get('rmse')})"
+                )
             recommendation_reason = (
                 f"Candidate did not satisfy same-protocol review criteria: {'; '.join(reasons)}. "
                 "EXP-019 retained as production champion."
@@ -464,8 +473,11 @@ class DailyCandidateTrainingRunner:
                 "beats_persistence_h1": beats_persistence_h1,
                 "beats_persistence_h24": beats_persistence_h24,
                 "beats_persistence_h72": beats_persistence_h72,
-                "meaningful_improvement_ge_15pct": meaningful_improvement,
-                "no_extreme_regression": no_extreme_regression,
+                "meets_quality_threshold": meets_quality_threshold,
+                "pct_improvement_vs_baseline": pct_improvement_vs_baseline,
+                "quality_threshold_pct": 20.0,
+                "extreme_gt200_ok": extreme_gt200_ok,
+                "extreme_gt300_ok": extreme_gt300_ok,
             },
             "exp019_reference_benchmarks": EXP019_REFERENCE_BENCHMARKS,
             "comparable_evaluation_protocol": False,
