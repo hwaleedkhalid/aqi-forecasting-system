@@ -17,18 +17,9 @@ import numpy as np
 
 from src.config import MODELS_DIR
 from src.feature_pipeline.aqi_calculator import get_aqi_category
+from src.inference.alerting import HEALTH_ADVISORIES, classify_category_alert, evaluate_forecast_alerts
 from src.inference.runtime_resolver import RuntimeAssetResolver
 from src.logger import logger
-
-# Official US EPA Health Advisories by Category
-HEALTH_ADVISORIES: dict[str, str] = {
-    "Good": "Air quality is satisfactory and air pollution poses little or no risk.",
-    "Moderate": "Air quality is acceptable; unusually sensitive individuals should consider reducing prolonged outdoor exertion.",
-    "Unhealthy for Sensitive Groups": "Members of sensitive groups (children, elderly, respiratory/heart conditions) may experience health effects. General public is less likely to be affected.",
-    "Unhealthy": "Some members of the general public may experience health effects; sensitive groups should avoid prolonged outdoor exertion.",
-    "Very Unhealthy": "Health alert: The risk of health effects is increased for everyone. Avoid strenuous outdoor activities.",
-    "Hazardous": "Health warning of emergency conditions: Everyone is more likely to be affected. Remain indoors and keep activity levels low.",
-}
 
 
 class AQIPostProcessor:
@@ -125,10 +116,11 @@ class AQIPostProcessor:
         # For AQI >= 301, this returns ('Hazardous', '#7E0023')
         category, color = get_aqi_category(aqi_val)
         advisory = self.get_advisory(category)
+        alert_cfg = classify_category_alert(category)
 
         err_lower, err_upper = self.compute_empirical_error_bounds(horizon, aqi_val)
 
-        # Consistent Phase 11 threshold definitions
+        # Consistent Phase 11 threshold definitions (preserved for backwards compatibility)
         high_severity = bool(aqi_val > 200.0)
         hazardous = bool(aqi_val > 300.0)
 
@@ -143,6 +135,8 @@ class AQIPostProcessor:
             "error_upper": round(err_upper, 1),
             "high_severity": high_severity,
             "hazardous": hazardous,
+            "alert_level": alert_cfg["level"],
+            "severity_rank": alert_cfg["severity_rank"],
         }
 
     def process_72h_forecast(
@@ -175,11 +169,20 @@ class AQIPostProcessor:
 
         return forecasts
 
-    def build_summary(self, forecasts: list[dict[str, Any]]) -> dict[str, Any]:
+    def build_summary(
+        self,
+        forecasts: list[dict[str, Any]],
+        data_is_stale: bool = False,
+        fallback_active: bool = False,
+        feature_source: str = "unknown",
+    ) -> dict[str, Any]:
         """Extract high-level multi-horizon summary statistics from forecast points.
 
         Args:
             forecasts: List of 72 horizon dictionaries.
+            data_is_stale: Provenance staleness indicator.
+            fallback_active: Provenance bootstrap indicator.
+            feature_source: Provenance feature source name.
 
         Returns:
             Summary dictionary containing peak AQI, horizon of peak, and event alerts.
@@ -197,6 +200,13 @@ class AQIPostProcessor:
         elif has_high_severity:
             highest_alert = "High Severity (>200)"
 
+        forecast_alert = evaluate_forecast_alerts(
+            forecasts,
+            data_is_stale=data_is_stale,
+            fallback_active=fallback_active,
+            feature_source=feature_source,
+        )
+
         return {
             "peak_aqi": peak_point["aqi"],
             "peak_horizon": peak_point["horizon"],
@@ -205,4 +215,5 @@ class AQIPostProcessor:
             "has_high_severity": has_high_severity,
             "has_hazardous": has_hazardous,
             "highest_alert_level": highest_alert,
+            "forecast_alert": forecast_alert.to_dict(),
         }

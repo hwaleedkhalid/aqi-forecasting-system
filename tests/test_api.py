@@ -93,6 +93,17 @@ class TestAPIEndpoints:
         assert "observation_dt" in data
         assert "feature_source" in data
         assert "retrieved_at" in data
+        # Alert layer metadata contract
+        assert "alert_level" in data
+        assert "severity_rank" in data
+        assert "alert" in data
+        alert = data["alert"]
+        assert "active" in alert
+        assert "level" in alert
+        assert "severity_rank" in alert
+        assert "threshold" in alert
+        assert "title" in alert
+        assert "message" in alert
         # Verify forecast keys are NOT present
         assert "forecasts" not in data
 
@@ -115,15 +126,45 @@ class TestAPIEndpoints:
         assert "is_stale" in data
         assert "inference_latency_ms" in data
 
-        # Check 72 forecast horizons
+        # Check forecast_alert at root and in summary
+        assert "forecast_alert" in data
+        f_alert = data["forecast_alert"]
+        assert "active" in f_alert
+        assert "highest_level" in f_alert
+        assert "highest_severity_rank" in f_alert
+        assert "peak_aqi" in f_alert
+        assert "peak_horizon" in f_alert
+        assert "peak_category" in f_alert
+        assert "first_advisory_horizon" in f_alert
+        assert "first_unhealthy_horizon" in f_alert
+        assert "first_very_unhealthy_horizon" in f_alert
+        assert "first_hazardous_horizon" in f_alert
+        assert "advisory_horizon_count" in f_alert
+        assert "unhealthy_horizon_count" in f_alert
+        assert "very_unhealthy_horizon_count" in f_alert
+        assert "hazardous_horizon_count" in f_alert
+        assert "severe_or_higher_horizon_count" in f_alert
+        assert "upper_interval_crosses_hazardous" in f_alert
+
+        # Check 72 forecast horizons with alerting metadata
         forecasts = data["forecasts"]
         assert len(forecasts) == 72
         assert forecasts[0]["horizon"] == 1
         assert forecasts[71]["horizon"] == 72
+        for pt in forecasts:
+            assert "alert_level" in pt
+            assert "severity_rank" in pt
+            assert "high_severity" in pt
+            assert "hazardous" in pt
 
-        # Check summary
+        # Check summary and legacy backward compatibility
         assert "summary" in data
-        assert "peak_aqi" in data["summary"]
+        summary = data["summary"]
+        assert "peak_aqi" in summary
+        assert "has_high_severity" in summary
+        assert "has_hazardous" in summary
+        assert "highest_alert_level" in summary
+        assert "forecast_alert" in summary
 
     def test_forecast_origin_equals_input_observation_time(self, client):
         resp = client.get("/api/forecast")

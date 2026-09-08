@@ -227,11 +227,12 @@ class TestDashboardComponents:
         assert len(fig.data[2].x) == 72
         assert len(fig.data[2].y) == 72
 
-        # Verify horizontal reference lines at 200 and 300
+        # Verify horizontal reference lines at exact EPA boundaries 151, 201, and 301
         shapes = fig.layout.shapes
         y_lines = [s.y0 for s in shapes if s.type == "line"]
-        assert 200 in y_lines
-        assert 300 in y_lines
+        assert 151 in y_lines
+        assert 201 in y_lines
+        assert 301 in y_lines
 
     def test_components_execute_without_exception(self, predictor):
         """Verify components can be called without runtime errors."""
@@ -274,6 +275,7 @@ class TestDashboardComponents:
             patch("streamlit.markdown"),
             patch("streamlit.subheader"),
             patch("streamlit.plotly_chart"),
+            patch("src.dashboard.app.render_alert_banners"),
             patch("src.dashboard.app.render_freshness_banner"),
             patch("src.dashboard.app.render_metadata_header"),
             patch("src.dashboard.app.render_current_observation_card"),

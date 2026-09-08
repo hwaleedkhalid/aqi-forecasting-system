@@ -17,6 +17,7 @@ import pandas as pd
 
 from src.config import PROCESSED_DATA_DIR
 from src.exceptions import ValidationError
+from src.inference.alerting import evaluate_current_alert, evaluate_forecast_alerts
 from src.inference.cache import PredictionCache
 from src.inference.explainer import ModelExplainer
 from src.inference.model_loader import ModelLoader
@@ -60,6 +61,8 @@ class AQIPredictor:
         current_aqi: float | None = None,
         forecast_origin: datetime | None = None,
         input_observed_at: datetime | None = None,
+        fallback_active: bool = False,
+        feature_source: str = "unknown",
     ) -> dict[str, Any]:
         """Generate a 72-hour forecast from a single input feature vector.
 
@@ -68,6 +71,8 @@ class AQIPredictor:
             current_aqi: Optional unscaled current AQI value. If not provided, extracted from input features.
             forecast_origin: Timestamp of forecast origin (default: current UTC time).
             input_observed_at: Timestamp when input telemetry was observed (for staleness auditing).
+            fallback_active: Whether bootstrap fallback is currently active.
+            feature_source: Name of feature provider ('hopsworks', 'bootstrap', etc.).
 
         Returns:
             Dictionary matching the PredictionResult contract.
@@ -132,12 +137,18 @@ class AQIPredictor:
 
         # 4. Post-processing & Enrichment
         forecasts = self.post_processor.process_72h_forecast(raw_preds_1d, forecast_origin=origin)
-        summary = self.post_processor.build_summary(forecasts)
-
         # 5. Freshness & Staleness Metadata
         input_age_hours = round(max(0.0, (now - observed_time).total_seconds() / 3600.0), 2)
         is_stale = bool(input_age_hours > 3.0)
         data_status = "stale" if is_stale else "live"
+
+        summary = self.post_processor.build_summary(
+            forecasts,
+            data_is_stale=is_stale,
+            fallback_active=fallback_active,
+            feature_source=feature_source,
+        )
+        forecast_alert = summary.get("forecast_alert", {})
 
         curr_cat, curr_color = self.post_processor.process_horizon_point(
             0, origin, curr_aqi_val
@@ -159,6 +170,7 @@ class AQIPredictor:
             "current_category": curr_cat,
             "current_color": curr_color,
             "summary": summary,
+            "forecast_alert": forecast_alert,
             "forecasts": forecasts,
         }
 
@@ -193,6 +205,11 @@ class AQIPredictor:
                 cached_result["is_stale"] = stale
                 cached_result["data_status"] = "stale" if stale else "live"
                 cached_result["generated_at"] = now.isoformat()
+                if "forecast_alert" in cached_result and isinstance(cached_result["forecast_alert"], dict):
+                    cached_result["forecast_alert"]["data_is_stale"] = stale
+                if "summary" in cached_result and isinstance(cached_result["summary"], dict):
+                    if "forecast_alert" in cached_result["summary"] and isinstance(cached_result["summary"]["forecast_alert"], dict):
+                        cached_result["summary"]["forecast_alert"]["data_is_stale"] = stale
                 return cached_result
 
         path = Path(dataset_path) if dataset_path else None
@@ -228,6 +245,8 @@ class AQIPredictor:
             current_aqi=current_aqi,
             forecast_origin=input_observed_at,
             input_observed_at=input_observed_at,
+            fallback_active=fallback_active,
+            feature_source=source_name,
         )
 
         result["feature_source"] = source_name
@@ -295,6 +314,12 @@ class AQIPredictor:
 
         data_status = "stale" if stale else "live"
         point = self.post_processor.process_horizon_point(0, observed_time, current_aqi)
+        current_alert = evaluate_current_alert(
+            aqi=current_aqi,
+            data_is_stale=stale,
+            feature_source=source_name,
+            fallback_active=fallback_active,
+        )
 
         return {
             "data_status": data_status,
@@ -308,6 +333,9 @@ class AQIPredictor:
             "category": point["category"],
             "color": point["color"],
             "health_advisory": point["health_advisory"],
+            "alert_level": point["alert_level"],
+            "severity_rank": point["severity_rank"],
+            "alert": current_alert.to_dict(),
             "pollutants": pollutants,
             "weather": weather,
             "feature_source": source_name,

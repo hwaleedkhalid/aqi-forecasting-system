@@ -79,22 +79,31 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
         )
     )
 
-    # 3. Horizontal Reference Lines for Domain Thresholds
+    # 3. Horizontal Reference Lines for EPA Category Boundaries
     fig.add_hline(
-        y=200,
+        y=151,
+        line_dash="dash",
+        line_color="#FF0000",
+        line_width=1.5,
+        annotation_text="Unhealthy (151)",
+        annotation_position="top left",
+        annotation_font=dict(color="#FF0000", size=10),
+    )
+    fig.add_hline(
+        y=201,
         line_dash="dash",
         line_color="#8F3F97",
         line_width=1.5,
-        annotation_text="High Severity (>200)",
+        annotation_text="Very Unhealthy (201)",
         annotation_position="top left",
         annotation_font=dict(color="#8F3F97", size=10),
     )
     fig.add_hline(
-        y=300,
+        y=301,
         line_dash="dash",
         line_color="#7E0023",
         line_width=1.5,
-        annotation_text="Hazardous (>300)",
+        annotation_text="Hazardous (301)",
         annotation_position="top left",
         annotation_font=dict(color="#7E0023", size=10),
     )
@@ -141,6 +150,93 @@ def render_freshness_banner(is_stale: bool, observed_at: str, age_hours: float) 
             f"⚠️ **Telemetry Notice**: Latest available observation is historical "
             f"(Observed: `{observed_at}`, Age: **{age_hours:.1f} hours**). "
             f"Forecasts are anchored to this historical observation origin, not current browser time."
+        )
+
+
+def render_alert_banners(obs_data: dict[str, Any], forecast_data: dict[str, Any]) -> None:
+    """Render prioritized, uncertainty-aware alert banners for observations, forecasts, and freshness.
+
+    Priority hierarchy:
+    1. Current Severe / Hazardous observation
+    2. Forecast Severe / Hazardous trajectory (within 72 hours)
+    3. Stale telemetry notice (if input observation > 3h old)
+    4. Current or Forecast Unhealthy warning / Advisory (if no higher tier active)
+    5. Upper empirical residual error interval crossing Hazardous threshold (if forecast < 201)
+
+    Args:
+        obs_data: Latest observation dictionary matching API contract.
+        forecast_data: Forecast result dictionary matching API contract.
+    """
+    # 1. Extract observation alert metadata
+    obs_alert = obs_data.get("alert")
+    if not obs_alert:
+        curr_aqi = obs_data.get("current_aqi", 0.0)
+        from src.inference.alerting import evaluate_current_alert
+        obs_alert = evaluate_current_alert(
+            aqi=curr_aqi,
+            data_is_stale=obs_data.get("is_stale", False),
+            feature_source=obs_data.get("feature_source", "unknown"),
+            fallback_active=obs_data.get("fallback_active", False),
+        ).to_dict()
+
+    obs_level = obs_alert.get("level", "none")
+    obs_aqi = obs_alert.get("aqi", obs_data.get("current_aqi", 0.0))
+    obs_cat = obs_alert.get("category", obs_data.get("category", "Unknown"))
+    obs_msg = obs_alert.get("message", "")
+
+    # 2. Extract forecast alert metadata
+    f_alert = forecast_data.get("forecast_alert") or forecast_data.get("summary", {}).get("forecast_alert") or {}
+    f_level = f_alert.get("highest_level", "none")
+    f_msg = f_alert.get("message", "")
+
+    # Priority 1: Current Severe / Hazardous observation
+    if obs_level == "hazardous":
+        st.error(
+            f"🚨 **HAZARDOUS AIR QUALITY EMERGENCY**: Current observed air quality in Lahore is "
+            f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
+        )
+    elif obs_level == "severe":
+        st.error(
+            f"⚠️ **VERY UNHEALTHY AIR QUALITY ALERT**: Current observed air quality in Lahore is "
+            f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
+        )
+
+    # Priority 2: Forecast Severe / Hazardous trajectory
+    if f_level == "hazardous":
+        st.error(f"🚨 **HAZARDOUS AQI FORECAST**: {f_msg}")
+    elif f_level == "severe":
+        st.error(f"⚠️ **VERY UNHEALTHY AQI FORECAST**: {f_msg}")
+
+    # Priority 3: Stale Data Notice (displayed alongside severe alerts if data is historical)
+    is_stale = forecast_data.get("is_stale", obs_data.get("is_stale", False))
+    observed_at = forecast_data.get("input_observed_at", obs_data.get("input_observed_at", "Unknown"))
+    age_hours = forecast_data.get("input_age_hours", obs_data.get("input_age_hours", 0.0))
+    if is_stale:
+        render_freshness_banner(is_stale=True, observed_at=observed_at, age_hours=age_hours)
+
+    # Priority 4: Warnings & Advisories (only if no severe/hazardous banners were shown for that tier)
+    if obs_level not in ("hazardous", "severe") and f_level not in ("hazardous", "severe"):
+        if obs_level == "warning":
+            st.warning(
+                f"⚠️ **UNHEALTHY AIR QUALITY WARNING**: Current observed air quality is "
+                f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
+            )
+        elif f_level == "warning":
+            st.warning(f"⚠️ **UNHEALTHY AQI FORECAST**: {f_msg}")
+        elif obs_level == "advisory":
+            st.info(
+                f"ℹ️ **AIR QUALITY ADVISORY**: Current observed air quality is "
+                f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
+            )
+        elif f_level == "advisory":
+            st.info(f"ℹ️ **AIR QUALITY ADVISORY FORECAST**: {f_msg}")
+
+    # Priority 5: Upper residual error interval crosses hazardous while point forecast does not
+    if f_alert.get("upper_interval_crosses_hazardous") and f_level not in ("hazardous", "severe"):
+        st.info(
+            "ℹ️ **Uncertainty Notice**: The 90th percentile empirical error interval crosses the Hazardous "
+            "threshold (>300 AQI) at one or more horizons, indicating extreme air pollution tail risk. "
+            "Monitor ongoing hourly telemetry updates."
         )
 
 
@@ -250,12 +346,35 @@ def render_sidebar(model_info: dict[str, Any], summary: dict[str, Any], source_m
     if summary:
         st.sidebar.markdown(f"- **Peak AQI:** `{summary.get('peak_aqi', 0.0):.1f}` (+{summary.get('peak_horizon', 0)}h)")
         st.sidebar.markdown(f"- **Peak Category:** `{summary.get('peak_category', 'N/A')}`")
-        if summary.get("has_hazardous"):
-            st.sidebar.error("⚠️ Severe Alert: Hazardous AQI (>300) predicted within 72h!")
-        elif summary.get("has_high_severity"):
-            st.sidebar.warning("⚠️ Alert: High Severity AQI (>200) predicted within 72h.")
+
+        forecast_alert = summary.get("forecast_alert") or {}
+        highest_level = forecast_alert.get("highest_level")
+        if not highest_level:
+            if summary.get("has_hazardous"):
+                highest_level = "hazardous"
+            elif summary.get("has_high_severity"):
+                highest_level = "severe"
+            else:
+                highest_level = "none"
+
+        if highest_level == "hazardous":
+            first_h = forecast_alert.get("first_hazardous_horizon")
+            h_str = f" (first at +{first_h}h)" if first_h else ""
+            st.sidebar.error(f"🚨 **Hazardous AQI Emergency**: Forecast enters Hazardous (>=301){h_str}!")
+        elif highest_level == "severe":
+            first_h = forecast_alert.get("first_very_unhealthy_horizon")
+            h_str = f" (first at +{first_h}h)" if first_h else ""
+            st.sidebar.error(f"⚠️ **Very Unhealthy Alert**: Forecast enters Very Unhealthy (201–300){h_str}.")
+        elif highest_level == "warning":
+            first_h = forecast_alert.get("first_unhealthy_horizon")
+            h_str = f" (first at +{first_h}h)" if first_h else ""
+            st.sidebar.warning(f"⚠️ **Unhealthy Warning**: Forecast enters Unhealthy (151–200){h_str}.")
+        elif highest_level == "advisory":
+            first_h = forecast_alert.get("first_advisory_horizon")
+            h_str = f" (first at +{first_h}h)" if first_h else ""
+            st.sidebar.info(f"ℹ️ **Advisory**: Forecast enters Sensitive Groups (101–150){h_str}.")
         else:
-            st.sidebar.success("No extreme AQI (>200) predicted in 72h window.")
+            st.sidebar.success("Good or Moderate air quality across all 72 forecast hours.")
 
 
 def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon: int) -> go.Figure:

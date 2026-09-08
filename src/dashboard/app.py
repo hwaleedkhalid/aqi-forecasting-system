@@ -20,6 +20,7 @@ import streamlit as st
 
 from src.dashboard.components import (
     build_forecast_figure,
+    render_alert_banners,
     render_current_observation_card,
     render_explainability_section,
     render_freshness_banner,
@@ -104,11 +105,8 @@ def main() -> None:
         st.error(f"Failed to load air quality data: {e}")
         return
 
-    # 1. Stale Data Notice Banner (prominent when telemetry is historical)
-    is_stale = forecast_data.get("is_stale", obs_data.get("is_stale", False))
-    observed_at = forecast_data.get("input_observed_at", obs_data.get("input_observed_at", "Unknown"))
-    age_hours = forecast_data.get("input_age_hours", obs_data.get("input_age_hours", 0.0))
-    render_freshness_banner(is_stale, observed_at, age_hours)
+    # 1. Unified Alert & Freshness Banners
+    render_alert_banners(obs_data, forecast_data)
 
     # 2. Metadata & Provenance Row
     forecast_origin = forecast_data.get("forecast_origin", observed_at)
