@@ -92,7 +92,12 @@ The live Hopsworks Feature Store, Model Registry, and Scheduled Hourly Feature P
 * **Feature Group**: `aqi_weather_features_v2` (version 1, ID `52526`) on project `aqi_predictor_by_Waleed` (`https://eu-west.cloud.hopsworks.ai`).
 * **Key Architecture**: `primary_key=["location_id"]`, `event_time="dt"`, `online_enabled=True`, `time_travel_format="HUDI"`.
 * **Offline Storage**: Contains 48,716 historical hourly observations spanning November 28, 2020 through September 7, 2026 for Lahore across 115 columns (`location_id` + 114 canonical features). Idempotency is verified: re-upserting historical records maintains row count without inflation.
-* **Online Storage**: Synchronized with the latest live observation (`dt = 1788804000`, 2026-09-07 18:00:00 UTC) using server-side `upsert_if_newer=True` protection, verifying that delayed or older historical retries cannot regress the online Lahore entity. Freshness verified with observation age < 1 hour (`is_stale=false`).
+* **Online Storage & Unified Feature Resolver**:
+  * Live online features served via `FeatureObservationResolver` (`src/inference/observation_resolver.py`), providing an authoritative single observation contract across `/api/current`, `/api/forecast`, and `/api/explain`.
+  * *Hierarchy Modes*: Controlled via `FEATURE_SOURCE_MODE` (`auto` [default], `hopsworks` [strict fail-closed], `bootstrap` [committed vector fallback]).
+  * *Targeted Entity Retrieval*: Queries `fg.select_all().filter(fg.location_id == "lahore").read(online=True)` with exact 114 canonical schema validation and non-finite numeric rejection.
+  * *Dynamic Freshness & Ephemerality*: Freshness (`input_age_hours`, `is_stale`) and dominant pollutant are dynamically calculated per response rather than frozen in cache. Short-TTL (60s) thread-safe in-memory caching protects the online store against request floods while supporting `force_refresh=true`.
+  * *Graceful Fallback*: In `auto` mode, missing cloud credentials or network disruptions seamlessly activate the committed canonical bootstrap vector without service degradation or secret leakage.
 * **Hourly Live Feature Pipeline**: The feature pipeline is configured to run automatically every hour via GitHub Actions (`.github/workflows/feature_pipeline.yml`, cron schedule `17 * * * *`), and the exact live workflow path has been successfully verified through `workflow_dispatch` in production workflow run [34152458548](https://github.com/hwaleedkhalid/aqi-forecasting-system/actions/runs/34152458548), fetching live 72h OpenWeather pollution telemetry and Open-Meteo meteorology, verifying temporal grid continuity, computing canonical 114 features, and mutating Hopsworks Feature Store with zero latency regressions.
   * *Telemetry Providers*: OpenWeather Air Pollution History API (72h criteria pollutants) + Open-Meteo Weather API (`past_days=3, forecast_days=1` surface meteorology).
   * *Temporal Continuity*: Enforces strict hourly grid continuity over $[T-24\text{h}, T]$ with established production limit=3 linear/time interpolation for short sensor dropouts, failing closed on unbridgeable gaps $> 3$ hours.
@@ -102,7 +107,7 @@ The live Hopsworks Feature Store, Model Registry, and Scheduled Hourly Feature P
     * Dry run: `python -m src.feature_pipeline.run_hourly_ingestion --dry-run`
     * Live ingestion: `python -m src.feature_pipeline.run_hourly_ingestion --live`
   * *Isolated Dependencies*: Scheduled workflow uses `requirements-feature-pipeline.txt` (`hopsworks[python]==5.0.6`), supplying `confluent-kafka` and `pyarrow` for streaming feature group ingestion while isolating cloud dependencies from the deployed Render/Streamlit environments.
-* **Inference Contract & Parity**: Strict 114-column projection preserves canonical schema order with 0.00000000 maximum numerical difference against local data and transparent staleness detection.
+* **Inference Contract & Parity**: Strict 114-column projection preserves canonical schema order with 0.00000000 maximum numerical difference between forecast points and SHAP attributions, with transparent staleness detection and exact `observation_dt` tracking.
 * **Model Registry**: Frozen production champion registered under `pearls_aqi_production_champion` (version 1, ID `pearls_aqi_production_champion_1`). Packages the complete EXP-019 runtime bundle (hybrid model, scaler, canonical 114-feature schema, empirical residual intervals, and explainability assets) with SHA256 integrity manifest.
 * **Clean-Download & Parity Verification**: Independent clean-download from Hopsworks into an isolated directory verified exact SHA256 matches across all files, standalone loadability, and 0.00000000 maximum absolute prediction error across all 72 horizons (including boundary horizons h1, h6, h7, h24, h37, h38, h39, h72) and explainability parity on h1, h24, h72.
 * **Production Boundary**: The deployed Render API and Streamlit UI remain self-contained using the frozen Git deployment bundle for production stability; Model Registry registration fulfills the central artifact tracking requirement and is independently reproducible via `python -m src.inference.hopsworks_registry --all`.
@@ -115,7 +120,8 @@ Based on the final out-of-time test across 9,311 samples (2025-06-07 to 2026-08-
   * h+72 RMSE = 77.43
 * **Benchmark Comparison**: Beats Naive Persistence (RMSE 85.35) by 11.06% relative RMSE reduction.
 * **Walk-forward Validation**: 4/4 temporal folds won against Naive Persistence, with a mean relative gain of 24.46% (mean RMSE 83.44 vs 110.46).
-* **Test Suite**: 389 automated tests passing across 30 test modules (73% code coverage).
+* **Test Suite**: 403 automated tests passing across 32 test modules (72.70% code coverage).
+
 
 ## REST API Endpoints
 
