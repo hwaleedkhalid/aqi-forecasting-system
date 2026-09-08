@@ -44,7 +44,7 @@ GitHub Repository
 The EXP-019 hybrid architecture operates across the 72-hour horizon as follows:
 * **h=1..6**: LightGBM Direct Multi-Output (6 independent gradient-boosted regressors)
 * **h=7..37**: Ridge Regression (alpha=1.0)
-* **h=38..72**: Smoothly blended Ridge + Persistence (blend weight decays linearly from 1.0 to 0.6 over 35 horizons)
+* **h=38..72**: Smoothly blended Ridge + Persistence (blend weight decays linearly from 1.0 at h38 to 0.7 at h72 over 35 horizons)
 
 The model takes a 114 weather-enriched input feature vector scaled via StandardScaler (fitted on training data only).
 
