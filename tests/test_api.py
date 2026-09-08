@@ -65,6 +65,8 @@ class TestAPIEndpoints:
         assert data["service_ready"] is True
         assert data["model_loaded"] is True
         assert data["model_id"] == "EXP-019"
+        assert "feature_source_mode" in data
+        assert "feature_source_last" in data
         assert "timestamp" in data
 
     def test_health_degraded_when_model_missing(self, client):
@@ -88,6 +90,8 @@ class TestAPIEndpoints:
         assert "weather" in data
         assert data["data_status"] in ["live", "stale"]
         assert "input_observed_at" in data
+        assert "observation_dt" in data
+        assert "feature_source" in data
         assert "retrieved_at" in data
         # Verify forecast keys are NOT present
         assert "forecasts" not in data
@@ -103,6 +107,8 @@ class TestAPIEndpoints:
         assert data["feature_count"] == 114
         assert data["data_status"] in ["live", "stale"]
         assert "input_observed_at" in data
+        assert "observation_dt" in data
+        assert "feature_source" in data
         assert "forecast_origin" in data
         assert "generated_at" in data
         assert "input_age_hours" in data

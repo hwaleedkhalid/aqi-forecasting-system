@@ -171,6 +171,8 @@ class TestAPIAndPredictorConsistency:
         assert round(explain_h72, 1) == forecast_h72
         assert explain_res["input_observed_at"] == forecast_res["input_observed_at"]
         assert explain_res["forecast_origin"] == forecast_res["forecast_origin"]
+        assert explain_res["observation_dt"] == forecast_res["observation_dt"]
+        assert explain_res["feature_source"] == forecast_res["feature_source"]
         assert explain_res["is_stale"] == forecast_res["is_stale"]
 
     def test_api_explain_endpoint_200_ok(self, flask_client):
@@ -181,6 +183,8 @@ class TestAPIAndPredictorConsistency:
         assert data["model_id"] == "EXP-019"
         assert data["horizon"] == 24
         assert len(data["top_features"]) == 5
+        assert "observation_dt" in data
+        assert "feature_source" in data
         assert "global_persistence_mean_contribution" in data
         assert "global_top_features" in data
         assert "additivity_error" in data

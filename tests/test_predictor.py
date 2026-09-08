@@ -194,7 +194,14 @@ class TestAQIPredictor:
     ):
         res1 = predictor.predict_latest(use_cache=True, force_refresh=True)
         res2 = predictor.predict_latest(use_cache=True, force_refresh=False)
-        assert res1 == res2
+        # Dynamic freshness timestamp updates per request
+        assert res1["forecasts"] == res2["forecasts"]
+        assert res1["current_aqi"] == res2["current_aqi"]
+        assert res1["forecast_origin"] == res2["forecast_origin"]
+        assert res1["input_observed_at"] == res2["input_observed_at"]
+        assert res1["observation_dt"] == res2["observation_dt"]
+        assert res1["feature_source"] == res2["feature_source"]
+        assert "generated_at" in res1 and "generated_at" in res2
 
     def test_get_latest_observation_does_not_require_model_inference(
         self, predictor: AQIPredictor

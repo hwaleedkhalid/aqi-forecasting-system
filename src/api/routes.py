@@ -73,6 +73,7 @@ def health_check() -> Any:
         scaler = predictor.model_loader.load_scaler()
         schema = predictor.model_loader.load_schema()
         model_ready = bool(model.is_fitted and scaler is not None and len(schema) == 114)
+        resolver_status = predictor.observation_resolver.get_status()
 
         if model_ready:
             return jsonify({
@@ -80,6 +81,8 @@ def health_check() -> Any:
                 "service_ready": True,
                 "model_loaded": True,
                 "model_id": "EXP-019",
+                "feature_source_mode": resolver_status["mode"],
+                "feature_source_last": resolver_status["last_source"],
                 "timestamp": now.isoformat(),
             }), 200
         else:
@@ -87,6 +90,8 @@ def health_check() -> Any:
                 "status": "degraded",
                 "service_ready": False,
                 "model_loaded": False,
+                "feature_source_mode": resolver_status["mode"],
+                "feature_source_last": resolver_status["last_source"],
                 "timestamp": now.isoformat(),
             }), 503
     except Exception as e:
@@ -103,12 +108,16 @@ def health_check() -> Any:
 def get_current_aqi() -> Any:
     """Return the latest observed telemetry observation without model inference.
 
+    Query parameters:
+        force_refresh (bool, optional): If 'true', bypass resolver cache. Default 'false'.
+
     Returns:
         200 OK JSON containing latest observation values, category, and freshness metadata.
     """
+    force_refresh = parse_bool_arg(request.args.get("force_refresh"), default=False)
     try:
         predictor = get_predictor()
-        obs = predictor.get_latest_observation()
+        obs = predictor.get_latest_observation(force_refresh=force_refresh)
         return jsonify(obs), 200
     except FileNotFoundError as e:
         raise ServiceUnavailable("Observation telemetry dataset is currently unavailable.") from e
@@ -158,6 +167,7 @@ def get_model_explanation() -> Any:
     Query parameters:
         horizon (int, optional): Prediction horizon to explain (1..72, default: 24).
         top_k (int, optional): Number of top features to return (1..50, default: 10).
+        force_refresh (bool, optional): If 'true', bypass resolver cache. Default 'false'.
 
     Returns:
         200 OK JSON containing horizon feature attributions, persistence decomposition,
@@ -165,6 +175,7 @@ def get_model_explanation() -> Any:
     """
     horizon_raw = request.args.get("horizon", "24")
     top_k_raw = request.args.get("top_k", "10")
+    force_refresh = parse_bool_arg(request.args.get("force_refresh"), default=False)
 
     try:
         horizon = int(horizon_raw)
@@ -182,7 +193,8 @@ def get_model_explanation() -> Any:
 
     try:
         predictor = get_predictor()
-        explanation = predictor.explain_latest(horizon=horizon, top_k=top_k)
+        obs = predictor.observation_resolver.resolve_observation(force_refresh=force_refresh)
+        explanation = predictor.explain_latest(horizon=horizon, top_k=top_k, observation=obs)
         return jsonify(explanation), 200
     except FileNotFoundError as e:
         raise ServiceUnavailable("Feature dataset or model artifacts are unavailable for explainability.") from e
@@ -191,4 +203,5 @@ def get_model_explanation() -> Any:
     except Exception as e:
         logger.error(f"Error generating SHAP explanation: {e}", exc_info=True)
         raise ServiceUnavailable("Failed to generate model explanation.") from e
+
 
