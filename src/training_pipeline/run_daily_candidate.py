@@ -162,6 +162,7 @@ class DailyCandidateTrainingRunner:
     def _build_candidate_model(self) -> Any:
         """Instantiate candidate model family."""
         if self.candidate_family == "ridge":
+            # Candidate Ridge model uses L2 regularization alpha=10.0 tuned for 113 collinear features
             return MultiOutputRegressor(Ridge(alpha=10.0, random_state=42), n_jobs=-1)
         elif self.candidate_family == "hybrid":
             return PersistenceAwareHybridModel(
@@ -276,6 +277,7 @@ class DailyCandidateTrainingRunner:
                 "latest_utc": audit_report["latest_utc"],
             },
             "protected_holdout": holdout_meta,
+            "post_cutoff_quarantined_region": holdout_meta,
             "usable_development_samples": len(df_features),
             "train_sample_count": len(X_train_raw),
             "val_sample_count": len(X_val_raw),
@@ -367,9 +369,15 @@ class DailyCandidateTrainingRunner:
                 "improvement_vs_baseline_pct": pct_improvement_vs_baseline,
             }, f, indent=2)
 
-        # 11. Dynamic Recommendation Gate (Strict Multi-Condition Logic)
+        # 11. Dynamic Recommendation Gate (Strict Same-Protocol Multi-Condition Logic)
         # Default: retain champion.
-        # Candidate merits manual review ONLY when beating persistence overall & across key horizons.
+        # Candidate merits manual review ONLY on same-protocol evidence:
+        # 1. Candidate beats persistence overall (cand_rmse < baseline_rmse)
+        # 2. Candidate beats persistence at milestone horizons h1, h24, and h72
+        # 3. Candidate achieves a meaningful relative improvement over persistence (>= 15%)
+        # 4. No material regression in AQI >200 / >300 subsets when sample counts are sufficient (>= 30)
+        # Under NO circumstances does the gate use EXP-019 out-of-time holdout RMSE (75.91)
+        # because the candidate is evaluated on the pre-holdout development validation split.
         beats_persistence_overall = bool(cand_rmse < baseline_rmse)
         beats_persistence_h1 = bool(
             candidate_eval["key_horizons"]["h1"]["rmse"] < baseline_eval["key_horizons"]["h1"]["rmse"]
@@ -380,26 +388,51 @@ class DailyCandidateTrainingRunner:
         beats_persistence_h72 = bool(
             candidate_eval["key_horizons"]["h72"]["rmse"] < baseline_eval["key_horizons"]["h72"]["rmse"]
         )
-        meets_quality_threshold = bool(cand_rmse <= 75.91 or pct_improvement_vs_baseline >= 20.0)
+        meaningful_improvement = bool(pct_improvement_vs_baseline >= 15.0)
+
+        # Check for material regression on extreme subsets (>200 and >300) when sample count is sufficient (>= 30)
+        no_extreme_regression = True
+        extreme_regression_notes = []
+        for thresh_key, thresh_name in [("severe_gt200", "AQI > 200"), ("hazardous_gt300", "AQI > 300")]:
+            c_ext = candidate_eval["extreme_events"].get(thresh_key, {})
+            b_ext = baseline_eval["extreme_events"].get(thresh_key, {})
+            n_samples = c_ext.get("sample_count", 0)
+            if n_samples >= 30 and c_ext.get("rmse") is not None and b_ext.get("rmse") is not None:
+                if c_ext["rmse"] > b_ext["rmse"] * 1.05:
+                    no_extreme_regression = False
+                    extreme_regression_notes.append(
+                        f"{thresh_name} regression: candidate RMSE ({c_ext['rmse']}) > baseline RMSE ({b_ext['rmse']})"
+                    )
 
         merits_manual_review = (
             beats_persistence_overall
             and beats_persistence_h1
             and beats_persistence_h24
             and beats_persistence_h72
-            and meets_quality_threshold
+            and meaningful_improvement
+            and no_extreme_regression
         )
 
         if merits_manual_review:
             recommendation = "manual_review_recommended"
             recommendation_reason = (
-                f"Candidate ({self.candidate_family}) achieved {pct_improvement_vs_baseline}% gain vs persistence "
-                "and beat baseline across h1, h24, h72 on development validation. Candidate merits manual human review."
+                f"Candidate ({self.candidate_family}) achieved {pct_improvement_vs_baseline}% gain vs persistence, "
+                "beat persistence across h1, h24, h72 without extreme subset regressions on development validation. "
+                "Candidate merits manual human review (NO automatic promotion)."
             )
         else:
             recommendation = "retain_champion"
+            reasons = []
+            if not beats_persistence_overall:
+                reasons.append("did not beat persistence overall")
+            if not (beats_persistence_h1 and beats_persistence_h24 and beats_persistence_h72):
+                reasons.append("failed to beat persistence across all key horizons (h1, h24, h72)")
+            if not meaningful_improvement:
+                reasons.append(f"improvement vs persistence ({pct_improvement_vs_baseline}%) below 15% threshold")
+            if not no_extreme_regression:
+                reasons.extend(extreme_regression_notes)
             recommendation_reason = (
-                "Candidate did not satisfy all multi-horizon improvement criteria over baseline/champion. "
+                f"Candidate did not satisfy same-protocol review criteria: {'; '.join(reasons)}. "
                 "EXP-019 retained as production champion."
             )
 
@@ -426,11 +459,13 @@ class DailyCandidateTrainingRunner:
                 "h72_rmse": baseline_eval["key_horizons"]["h72"]["rmse"],
             },
             "improvement_vs_baseline_pct": pct_improvement_vs_baseline,
-            "beats_persistence_across_key_horizons": {
-                "overall": beats_persistence_overall,
-                "h1": beats_persistence_h1,
-                "h24": beats_persistence_h24,
-                "h72": beats_persistence_h72,
+            "same_protocol_evaluation": {
+                "beats_persistence_overall": beats_persistence_overall,
+                "beats_persistence_h1": beats_persistence_h1,
+                "beats_persistence_h24": beats_persistence_h24,
+                "beats_persistence_h72": beats_persistence_h72,
+                "meaningful_improvement_ge_15pct": meaningful_improvement,
+                "no_extreme_regression": no_extreme_regression,
             },
             "exp019_reference_benchmarks": EXP019_REFERENCE_BENCHMARKS,
             "comparable_evaluation_protocol": False,

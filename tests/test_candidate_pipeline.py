@@ -272,3 +272,28 @@ class TestDailyCandidateTrainingRunner:
         none_res = compute_extreme_metrics(y_true, y_pred, threshold=500.0)
         assert none_res["sample_count"] == 0
         assert none_res["rmse"] is None
+
+    def test_recommendation_gate_same_protocol_evaluation(self, synthetic_hourly_features, tmp_path):
+        csv_file = tmp_path / "offline_features.csv"
+        synthetic_hourly_features.to_csv(csv_file, index=False)
+
+        candidate_dir = tmp_path / "candidates"
+        runner = DailyCandidateTrainingRunner(
+            candidate_family="ridge",
+            output_dir=candidate_dir,
+            forecast_horizons=72,
+        )
+
+        res = runner.run(dry_run=False, offline_data_path=csv_file)
+        run_dir = Path(res["candidate_run_dir"])
+        comparison = json.loads((run_dir / "candidate_comparison.json").read_text(encoding="utf-8"))
+
+        assert "same_protocol_evaluation" in comparison
+        assert comparison["comparable_evaluation_protocol"] is False
+        assert "beats_persistence_overall" in comparison["same_protocol_evaluation"]
+        assert "meaningful_improvement_ge_15pct" in comparison["same_protocol_evaluation"]
+        assert "no_extreme_regression" in comparison["same_protocol_evaluation"]
+        # Invariant: EXP-019 holdout benchmarks are present only as reference
+        assert "exp019_reference_benchmarks" in comparison
+        assert comparison["exp019_reference_benchmarks"]["holdout_test"]["overall_rmse"] == 75.91
+

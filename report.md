@@ -238,7 +238,7 @@ This phase directly leveraged the preparation work completed in the first week. 
 
 1.  **Continuous Integration (`ci.yml`)**: Triggered on push or PR to the `main` branch. It sets up Python 3.10, executes the `pytest` suite enforcing `--cov-fail-under=70`, and uploads both JUnit XML results and coverage reports as workflow artifacts with a 14-day retention policy.
 2.  **Feature Pipeline (`feature_pipeline.yml`)**: A cron-driven job scheduled at `17 * * * *` (the 17th minute of every hour). It executes `src.feature_pipeline.run_hourly_ingestion`. It supports a `dry_run` input parameter for manual testing and uploads a telemetry snapshot artifact retained for 7 days.
-3.  **Training Pipeline (`training_pipeline.yml`)**: A weekly cron job executing at `23 2 * * 0` (Sundays at 02:23 UTC). It orchestrates candidate evaluation. Crucially, it enforces production model immutability by validating the SHA256 hash of the production model before and after execution to ensure silent overwrites cannot occur.
+3.  **Training Pipeline (`training_pipeline.yml`)**: A daily cron job executing at `45 2 * * *` (Daily at 02:45 UTC, providing a 28-minute buffer after hourly feature ingestion at minute 17). It orchestrates candidate model training and evaluation directly against authoritative historical data in the Hopsworks offline Feature Store, enforcing strict chronological embargoes, physical timestamp targets, and production champion immutability (validating the SHA256 hash before and after execution to guarantee zero silent overwrites).
 
 Because GitHub Actions runners are ephemeral, pipeline outputs and logs are explicitly saved as GitHub Actions artifacts. The fundamental understanding of runner lifecycles and secret management gained from the Discord resources made implementing these workflows straightforward.
 
@@ -246,7 +246,7 @@ Because GitHub Actions runners are ephemeral, pipeline outputs and logs are expl
 
 To elevate the system architecture to MLOps standards, I integrated Hopsworks as a cloud feature store and model registry layer.
 *   **Feature Group Architecture**: Created and populated production feature group `aqi_weather_features_v2` (version 1, ID `52526`) on project `aqi_predictor_by_Waleed` (`https://eu-west.cloud.hopsworks.ai`). Configured `primary_key=["location_id"]`, `event_time="dt"`, `online_enabled=True`, and `time_travel_format="HUDI"`.
-*   **Offline Storage**: Ingested 48,716 historical hourly observations (spanning 2020-11-28 13:00:00 UTC through 2026-09-07 15:00:00 UTC for Lahore) across 115 columns (`location_id` + 114 canonical features). Idempotency is verified: re-inserting historical records maintains row count without inflation.
+*   **Offline Storage**: Ingested 48,718 historical hourly observations (spanning 2020-11-28 13:00:00 UTC through 2026-09-07 21:00:00 UTC for Lahore) across 115 columns (`location_id` + 114 canonical features). Idempotency is verified: re-inserting historical records maintains row count without inflation.
 *   **Scheduled Hourly Live Feature Pipeline**: Configured to run automatically every hour via GitHub Actions (`.github/workflows/feature_pipeline.yml`, cron schedule `17 * * * *`). The exact live production workflow path has been successfully verified through `workflow_dispatch` in workflow run [34152458548](https://github.com/hwaleedkhalid/aqi-forecasting-system/actions/runs/34152458548), completing in 43 seconds.
     *   *Mathematical Lookback Necessity*: EXP-019 requires 114 canonical model inputs: 25 pollutant lags, 20 weather lags, 34 rolling aggregates, 6 differentials, 5 chemical interaction ratios, 7 cyclical/calendar signals, 9 base pollutants + AQI, 7 base meteorology, and 1 `dt`. A single instantaneous API reading at time $t$ cannot construct 24-hour backward lag and rolling windows. The pipeline therefore mandates a continuous $[T-24\text{h}, T]$ historical lookback context.
     *   *Dual Telemetry Providers*: Combines OpenWeather Air Pollution History API (`fetch_historical_air_quality` retrieving 72 hours of hourly criteria pollutants: CO, NO, NO₂, O₃, SO₂, PM2.5, PM10, NH₃) with Open-Meteo Weather API (`past_days=3, forecast_days=1` retrieving hourly temperature, humidity, surface pressure, wind speed, wind direction, and precipitation).
@@ -278,7 +278,7 @@ The API reports attributions in scaled z-space (providing both raw and scaled va
 
 ## 17. Testing
 
-The codebase is protected by 389 individual automated tests spanning 30 test modules and a central `conftest.py`. Overall test coverage is 73%, with critical-path inference, model loading, and explainability modules achieving between 88% and 100% coverage. The CI pipeline enforces a strict 70% minimum coverage gate. The test suite comprehensively covers the API layer, model internals, data ingestion logic, feature engineering routines, training pipelines, inference paths, runtime asset integrity resolution, clean-clone bootstrap parity, dashboard logic, workflow scripts, Hopsworks integration and backfill audit rules, Model Registry bundle integrity and idempotency, the scheduled hourly live feature pipeline (with grid continuity and out-of-order protection verification), and the SHAP explainability engine. All tests run in isolated environments with external cloud dependencies 100% mocked, ensuring CI remains fast, reliable, and secret-independent.
+The codebase is protected by 418 individual automated tests spanning 33 test modules and a central `conftest.py`. Overall test coverage is 73.43%, with critical-path inference, model loading, and explainability modules achieving between 88% and 100% coverage. The CI pipeline enforces a strict 70% minimum coverage gate. The test suite comprehensively covers the API layer, model internals, data ingestion logic, feature engineering routines, training pipelines, inference paths, runtime asset integrity resolution, clean-clone bootstrap parity, dashboard logic, workflow scripts, Hopsworks integration and backfill audit rules, Model Registry bundle integrity and idempotency, the scheduled hourly live feature pipeline (with grid continuity and out-of-order protection verification), the daily Feature-Store-driven candidate training and evaluation pipeline, and the SHAP explainability engine. All tests run in isolated environments with external cloud dependencies 100% mocked, ensuring CI remains fast, reliable, and secret-independent.
 
 
 ## 18. Challenges and Debugging
@@ -491,4 +491,138 @@ The system is publicly deployed and operational:
 ### 23.8 Final Project Outcome
 
 The Pearls AQI Predictor project is fully implemented, thoroughly tested, and publicly deployed. The application is reproducibly bootable from a clean Git clone, hosted across Streamlit Community Cloud and Render, and accessible through an interactive web dashboard backed by a high-speed Flask REST API. Operating on the frozen champion model EXP-019, the system delivers 72 continuous hourly predictions with empirical prediction error intervals, multi-horizon SHAP feature attributions, and transparent data freshness indicators.
+
+## 24. Daily Candidate Training and Evaluation from Hopsworks Feature Store
+
+### 24.1 Objectives and Operational Context
+
+To complete the full MLOps automation lifecycle, I implemented and verified a daily Feature-Store-driven candidate model training and evaluation pipeline. While the hourly ingestion pipeline (`feature_pipeline.yml` at `17 * * * *`) continuously publishes fresh telemetry and meteorology into the Hopsworks Feature Store (`aqi_weather_features_v2` v1), the training pipeline operationalizes the consumption of this accumulated offline store.
+
+The daily candidate training workflow operates under strict scientific and operational constraints:
+1. **Feature-Store-Driven Training**: Authoritative historical training data is retrieved directly from the Hopsworks Feature Store rather than re-downloading raw external APIs.
+2. **Strict Production Champion Immutability**: EXP-019 remains the immutable production champion. Under no circumstances does the daily pipeline automatically promote, overwrite, or deploy candidate models.
+3. **Temporal Validity & Anti-Leakage Invariants**: Strict chronological splitting, physical timestamp target construction, and a mandatory 73-hour embargo gap prevent any information leakage from future observations into earlier training partitions.
+4. **Protected Holdout Preservation**: Candidate development is strictly quarantined to observations prior to June 7, 2025. The entire 10,211-row post-cutoff/quarantined region (spanning June 7, 2025 through September 7, 2026), which contains the formal protected 9,311-sample final test partition (2025-06-07 to 2026-08-28) plus later accumulated observations, remains 100% untouched.
+
+### 24.2 Authoritative Feature Store Data Retrieval
+
+The training pipeline implements `FeatureStoreTrainingLoader` (`src/training_pipeline/dataset_builder.py`) to interface directly with the offline store:
+* **Feature Group & Entity Query**: Queries `aqi_weather_features_v2` (version 1) on project `aqi_predictor_by_Waleed` with a strict entity filter: `fg.select_all().filter(fg.location_id == "lahore").read()`.
+* **Bounded Arrow Flight Timeout**: Historical reads retrieve the full time series across the internet via Apache Arrow Flight. To prevent indefinite hangs in cloud runner environments, `read_options={"timeout": 300}` enforces a bounded 5-minute timeout.
+* **Auditable Deduplication**: Event timestamps (`dt`) are validated for strict integral Unix seconds. Duplicate event timestamps are audited: identical feature vectors at duplicate timestamps are deduplicated and logged with full audit counts, while conflicting feature values at the same timestamp raise an immediate `ValidationError`.
+* **Schema & Finiteness Audits**: Asserts the exact presence of all 114 canonical model-input columns (including `dt`). All features are audited for numeric finiteness; any `NaN` or `Inf` values raise a `ValidationError`.
+
+In live execution, the query successfully retrieved **48,718 historical hourly records** spanning from `2020-11-28 13:00:00 UTC` (`dt=1606568400`) through `2026-09-07 21:00:00 UTC` (`dt=1788814800`). The latest materialized offline row had an age of approximately 12.7 hours, successfully verifying asynchronous offline Hudi materialization.
+
+### 24.3 Protected Holdout Preservation
+
+To maintain scientific integrity and prevent data dredging across the production test set, candidate training enforces a hard temporal boundary:
+$$\text{HOLDOUT\_START\_DT} = 1749254400 \quad (2025\text{-}06\text{-}07\text{T}00:00:00\text{Z})$$
+
+* **Quarantined Development Period**: Only observations strictly prior to `2025-06-07T00:00:00Z` ($dt < 1749254400$) are admitted into candidate development, yielding **38,507 development samples** (spanning November 28, 2020 to June 6, 2025).
+* **Post-Cutoff/Quarantined Region**: Exactly **10,211 samples** (June 7, 2025 through September 7, 2026) are quarantined and preserved completely untouched. This post-cutoff region contains the formal protected 9,311-sample out-of-time final test partition (2025-06-07 to 2026-08-28) plus later accumulated observations. EXP-019 holdout metrics (RMSE 75.91, MAE 53.55, R² 0.4858) serve strictly as frozen reference benchmarks.
+
+### 24.4 Exact Physical Timestamp Target Construction
+
+In contrast to naive row-shifting (which silently corrupts multi-horizon targets when sensor dropouts create timestamp gaps), `FeatureStoreTrainingLoader.construct_physical_targets()` enforces exact physical timestamp semantics:
+$$y_{T, h} = \text{AQI}(T + h \times 3600) \quad \text{for } h = 1, \dots, 72$$
+
+1. Each observation at timestamp $T$ indexes the target lookup dictionary for the exact timestamp $T + h \times 3600$.
+2. If any of the required 72 physical future hourly observations is missing due to an unbridgeable historical gap, the training sample is cleanly dropped.
+3. No synthetic interpolation or forward-filling is applied to prediction targets.
+
+Across the 38,507 development records, physical target alignment retained **37,163 valid training samples** (1,344 samples at historical gap boundaries were cleanly discarded).
+
+### 24.5 Strict Anti-Leakage Embargo Split
+
+To evaluate candidates without temporal leakage, the 37,163 usable samples are split chronologically (80% train / 20% validation) with a mandatory 73-hour embargo gap:
+* **Train Cutoff Calculation**: For split timestamp $T_{\text{split}}$, the last allowed training input timestamp is:
+  $$T_{\text{train\_cutoff}} = T_{\text{split}} - (72 \times 3600) - 3600$$
+* **Leakage Invariant Verification**: The audit asserts two non-negotiable invariants:
+  $$\min(T_{\text{val\_input}}) > \max(T_{\text{train\_input}}) + 72\text{h}$$
+  $$\max(T_{\text{train\_target}}) < \min(T_{\text{val\_input}})$$
+* **Leakage Audit Results**:
+  * **Train Partition**: 29,658 samples (`2020-11-28 13:00:00 UTC` to `2024-06-20 06:00:00 UTC`)
+  * **Validation Partition**: 7,433 samples (`2024-06-23 07:00:00 UTC` to `2025-06-03 23:00:00 UTC`)
+  * **Embargo Separation**: Exact **73.0 hours** between final train input and first validation input (72 boundary samples purged).
+  * **Status**: Leakage audit **PASSED**.
+
+### 24.6 Leakage-Safe Preprocessing & Feature Isolation
+
+* **Predictor Matrix**: The 114 canonical columns contain `dt`, which is retained exclusively for temporal ordering, fold construction, and provenance tracking. It is strictly excluded from the fitted feature matrix, leaving exactly **113 model predictors**.
+* **Train-Only Scaling**: `StandardScaler` is fitted strictly on the training partition ($X_{\text{train}}$). The validation partition ($X_{\text{val}}$) is transformed using these frozen mean and variance parameters without any re-fitting.
+
+### 24.7 Candidate Model Architectures & Dynamic Recommendation Gate
+
+The candidate training runner (`src/training_pipeline/run_daily_candidate.py`) supports four candidate model families:
+1. `ridge`: MultiOutputRegressor wrapping `Ridge(alpha=10.0, random_state=42)`. The candidate Ridge model employs L2 regularization parameter $\alpha=10.0$ tuned to prevent overfitting across the 113 collinear weather and pollutant features (in contrast to the internal Ridge specialist in EXP-019 which utilizes $\alpha=1.0$ within the hybrid pipeline).
+2. `hybrid`: Multi-stage hybrid architecture mirroring EXP-019 (LightGBM on h1–h6, Ridge on h7–h37, blended Ridge + Persistence on h38–h72 with `min_blend_weight=0.7`).
+3. `lightgbm`: Direct multi-output gradient boosting across all 72 horizons.
+4. `random_forest`: MultiOutputRegressor wrapping `RandomForestRegressor`.
+
+#### Dynamic Recommendation Gate
+Under NO circumstances does the gate use EXP-019 out-of-time holdout RMSE (75.91) as a numeric threshold, because the candidate is evaluated on the pre-holdout development validation partition. The pipeline dynamically classifies the outcome into:
+* `retain_champion` (default): Candidate failed to strictly beat persistence across overall RMSE or milestone horizons (h1, h24, h72), failed to meet the $\ge 15\%$ relative improvement threshold, or exhibited material subset regressions on extreme AQI regimes (>200, >300).
+* `manual_review_recommended`: Candidate demonstrated statistically valid improvements over persistence on the same evaluation protocol, passed all stability invariants without extreme subset regressions, and merits offline inspection by the engineering team (under NO circumstances automatically promoted or deployed).
+
+### 24.8 Controlled Live Training Run Results
+
+A complete live training run was executed against the live Hopsworks Feature Store using the clean backend environment (`candidate_family="ridge"`):
+
+| Metric / Dimension | Candidate Model (`ridge`, $\alpha=10.0$) | Naive Persistence Baseline | Relative Improvement |
+| :--- | :--- | :--- | :--- |
+| **Overall RMSE** | **86.93** | 121.07 | **+28.20% gain** |
+| **Overall MAE** | **63.54** | 81.79 | **+22.31% gain** |
+| **Overall R²** | **0.5440** | 0.1155 | **+0.4285 delta** |
+| **h+1 RMSE** | **55.05** | 68.03 | **+19.08% gain** |
+| **h+6 RMSE** | **67.24** | 87.05 | **+22.76% gain** |
+| **h+24 RMSE** | **84.14** | 105.76 | **+20.44% gain** |
+| **h+48 RMSE** | **91.07** | 122.95 | **+25.93% gain** |
+| **h+72 RMSE** | **94.06** | 130.77 | **+28.07% gain** |
+| **Extreme AQI (>200) RMSE** | **110.32** (n=3,812) | 162.45 | **+32.09% gain** |
+| **Extreme AQI (>300) RMSE** | **128.51** (n=1,104) | 194.22 | **+33.83% gain** |
+
+* **Execution Runtime**: 50.01 seconds.
+* **Recommendation**: `manual_review_recommended` (comfortably beat persistence overall and across all milestone horizons on development validation without extreme regressions).
+* **Reference Comparison Note**: Candidate validation metrics (evaluating 2024–2025 pre-holdout validation data) cannot be directly compared to EXP-019 holdout test metrics (evaluating 2025–2026 out-of-time holdout data). They reflect separate temporal evaluation regimes.
+
+### 24.9 Candidate Artifact Isolation and SHA256 Integrity
+
+Candidate artifacts are strictly quarantined to unique, timestamped directories under `data/models/candidates/<run_id>/`:
+```text
+data/models/candidates/candidate-20260908T094225Z-ridge/
+├── candidate_model.joblib          # Trained candidate model
+├── scaler.joblib                   # Train-fitted StandardScaler
+├── evaluation.json                 # Comprehensive multi-horizon metrics
+├── dataset_provenance.json         # Feature Store row counts, temporal bounds, and schema hash
+├── candidate_comparison.json       # Comparison against persistence and EXP-019 reference
+└── manifest.json                   # Cryptographic SHA256 hashes of all artifacts
+```
+
+The runner actively asserts that the candidate directory is outside `data/runtime/production/`.
+
+### 24.10 Production Champion Immutability and Model Registry Verification
+
+Following the completion of the live candidate run:
+1. **Local Production Bundle Verification**: Computed SHA256 checksums of all 4 production files in `data/runtime/production/`:
+   * `production_hybrid_model.joblib`: `f51d2eff53b8eadaf7ddb615f1dc76aeed30526038c79cc68ae758e52d8412ee` (MATCH: True)
+   * `feature_scaler_v2_weather.joblib`: `9ce7e9fcc4fe65c279435b8109bf4397a61d15442df152a5538e1b6f0e470876` (MATCH: True)
+   * `feature_schema_v2_weather.json`: `38a5fdea89b0c5edba23f8cb20d36b81a8f60c4161b96a1a1f1e31dbeecb121e` (MATCH: True)
+   * `empirical_error_intervals.json`: `dba4571ebe0599aaeb3467fe287a93424d1a581eeb5c8fe221972f4400cb59f8` (MATCH: True)
+   * **Result**: All 4 production assets verified **100% byte-for-byte identical**.
+2. **Hopsworks Model Registry Audit**: Queried live model registry `aqi_predictor_by_Waleed`:
+   * `pearls_aqi_production_champion` contains exactly **1 version** (version 1, ID `pearls_aqi_production_champion_1`).
+   * Exactly **0 candidate models** were registered in the cloud registry.
+   * **Result**: Production champion remains completely unaltered.
+
+### 24.11 Daily GitHub Actions Automation Workflow
+
+The training workflow (`.github/workflows/training_pipeline.yml`) has been updated and verified:
+* **Cron Schedule**: `45 2 * * *` (Daily at 02:45 UTC, providing a 28-minute buffer after hourly ingestion at minute 17).
+* **Concurrency Control**: `group: model-training-pipeline`, `cancel-in-progress: false` ensures training runs execute sequentially without race conditions.
+* **Security & Secrets**: Requires only `HOPSWORKS_API_KEY`, `HOPSWORKS_PROJECT`, and `HOPSWORKS_HOST`. No OpenWeather API key is required, demonstrating complete independence from external ingestion APIs.
+* **Pre/Post Immutability Assertion**: Directly hashes all four authoritative assets in `data/runtime/production/` before and after execution (`sha256sum ... > /tmp/prod_authoritative_hashes_before.txt` and `diff`), failing the entire workflow if any byte modification occurs.
+* **Artifact Retention**: Automatically uploads `data/models/candidates/` as a workflow artifact with 14-day retention.
+* **Workflow Dispatch**: The daily candidate training pipeline is configured to run daily and its exact production path has been verified through `workflow_dispatch` with `candidate_family` (`ridge`, `hybrid`, `lightgbm`, `random_forest`) and `dry_run` boolean flags.
+
 

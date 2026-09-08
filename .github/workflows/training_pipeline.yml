@@ -60,9 +60,16 @@ jobs:
           mkdir -p data/models
           cp -n data/runtime/production/production_hybrid_model.joblib data/models/production_hybrid_model.joblib || true
 
-      - name: Record Production Model Hash (Immutability Guarantee)
+      - name: Hash Authoritative Production Assets Before Execution
         run: |
           sha256sum data/models/production_hybrid_model.joblib > /tmp/prod_model_hash_before.txt
+          sha256sum \
+            data/runtime/production/production_hybrid_model.joblib \
+            data/runtime/production/feature_scaler_v2_weather.joblib \
+            data/runtime/production/feature_schema_v2_weather.json \
+            data/runtime/production/empirical_error_intervals.json \
+            > /tmp/prod_authoritative_hashes_before.txt
+          cat /tmp/prod_authoritative_hashes_before.txt
 
       - name: Run Daily Candidate Training Pipeline
         env:
@@ -85,10 +92,20 @@ jobs:
         run: |
           sha256sum data/models/production_hybrid_model.joblib > /tmp/prod_model_hash_after.txt
           diff /tmp/prod_model_hash_before.txt /tmp/prod_model_hash_after.txt || {
-            echo "::error::CRITICAL INVARIANT VIOLATION: Production champion artifact was modified!"
+            echo "::error::CRITICAL INVARIANT VIOLATION: Seeded production model artifact was modified!"
             exit 1
           }
-          echo "Production champion immutability verified: 100% byte-for-byte identical."
+          sha256sum \
+            data/runtime/production/production_hybrid_model.joblib \
+            data/runtime/production/feature_scaler_v2_weather.joblib \
+            data/runtime/production/feature_schema_v2_weather.json \
+            data/runtime/production/empirical_error_intervals.json \
+            > /tmp/prod_authoritative_hashes_after.txt
+          diff /tmp/prod_authoritative_hashes_before.txt /tmp/prod_authoritative_hashes_after.txt || {
+            echo "::error::CRITICAL INVARIANT VIOLATION: Authoritative production runtime assets modified!"
+            exit 1
+          }
+          echo "Production champion immutability verified: 100% byte-for-byte identical across all 4 authoritative assets."
 
       - name: Upload Candidate Artifacts and Evaluation Bundle
         uses: actions/upload-artifact@v4

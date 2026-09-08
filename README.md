@@ -91,7 +91,7 @@ These versioned assets enable deterministic clean-clone deployment without requi
 The live Hopsworks Feature Store, Model Registry, and Scheduled Hourly Feature Pipeline have been implemented and verified:
 * **Feature Group**: `aqi_weather_features_v2` (version 1, ID `52526`) on project `aqi_predictor_by_Waleed` (`https://eu-west.cloud.hopsworks.ai`).
 * **Key Architecture**: `primary_key=["location_id"]`, `event_time="dt"`, `online_enabled=True`, `time_travel_format="HUDI"`.
-* **Offline Storage**: Contains 48,716 historical hourly observations spanning November 28, 2020 through September 7, 2026 for Lahore across 115 columns (`location_id` + 114 canonical features). Idempotency is verified: re-upserting historical records maintains row count without inflation.
+* **Offline Storage**: Contains 48,718 historical hourly observations spanning November 28, 2020 through September 7, 2026 for Lahore across 115 columns (`location_id` + 114 canonical features). Idempotency is verified: re-upserting historical records maintains row count without inflation.
 * **Online Storage & Unified Feature Resolver**:
   * Live online features served via `FeatureObservationResolver` (`src/inference/observation_resolver.py`), providing an authoritative single observation contract across `/api/current`, `/api/forecast`, and `/api/explain`.
   * *Hierarchy Modes*: Controlled via `FEATURE_SOURCE_MODE` (`auto` [default], `hopsworks` [strict fail-closed], `bootstrap` [committed vector fallback]).
@@ -107,6 +107,14 @@ The live Hopsworks Feature Store, Model Registry, and Scheduled Hourly Feature P
     * Dry run: `python -m src.feature_pipeline.run_hourly_ingestion --dry-run`
     * Live ingestion: `python -m src.feature_pipeline.run_hourly_ingestion --live`
   * *Isolated Dependencies*: Scheduled workflow uses `requirements-feature-pipeline.txt` (`hopsworks[python]==5.0.6`), supplying `confluent-kafka` and `pyarrow` for streaming feature group ingestion while isolating cloud dependencies from the deployed Render/Streamlit environments.
+* **Daily Candidate Training & Evaluation Pipeline**: The daily candidate training pipeline is configured to run daily and its exact production path has been verified through `workflow_dispatch` via GitHub Actions (`.github/workflows/training_pipeline.yml`, cron schedule `45 2 * * *`).
+  * *Authoritative Feature Store Retrieval*: Directly queries the offline Hopsworks Feature Store (`aqi_weather_features_v2` v1, `location_id="lahore"`, 48,718 rows retrieved) via `FeatureStoreTrainingLoader`. Auditable deduplication records any identical duplicates, and schema audit validates all 114 canonical columns, integral timestamps, and numeric finiteness.
+  * *Protected Holdout Preservation*: Filters training candidates strictly to observations prior to `2025-06-07T00:00:00Z` (38,507 development samples), keeping the post-cutoff/quarantined region (10,211 rows, containing the formal 9,311-sample 2025-06-07 to 2026-08-28 final test set plus later accumulated observations) 100% untouched.
+  * *Physical Timestamp Targets*: Enforces exact physical timestamp semantics ($T + h \times 3600$) for horizons $h=1 \dots 72$. Missing target timestamps cleanly drop the sample without synthetic interpolation (37,163 usable samples retained).
+  * *Anti-Leakage Embargo Split*: Implements strict chronological 80/20 train/validation partitioning with a 73-hour embargo gap enforcing $\min(T_{\text{val\_input}}) > \max(T_{\text{train\_input}}) + 72\text{h}$ and asserting $\max(T_{\text{train\_target}}) < \min(T_{\text{val\_input}})$.
+  * *Leakage-Safe Preprocessing*: `StandardScaler` is fitted strictly on the training partition; validation data is scaled using train-fitted parameters.
+  * *Candidate Evaluation & Baselines*: Evaluates candidate model families (candidate `ridge` with `alpha=10.0`, `hybrid`, `lightgbm`, `random_forest`) across overall RMSE, MAE, R², milestone horizons (h1, h6, h24, h48, h72), and extreme AQI regimes (>200, >300), benchmarked against Naive Persistence.
+  * *Candidate Isolation & Champion Protection*: Frozen EXP-019 champion remains the production model. All candidate models and evaluation reports are written to isolated directories (`data/models/candidates/<run_id>/`) with SHA256 manifests and uploaded as workflow artifacts. Under NO circumstances does the pipeline automatically promote, overwrite, or deploy candidate models.
 * **Inference Contract & Parity**: Strict 114-column projection preserves canonical schema order with 0.00000000 maximum numerical difference between forecast points and SHAP attributions, with transparent staleness detection and exact `observation_dt` tracking.
 * **Model Registry**: Frozen production champion registered under `pearls_aqi_production_champion` (version 1, ID `pearls_aqi_production_champion_1`). Packages the complete EXP-019 runtime bundle (hybrid model, scaler, canonical 114-feature schema, empirical residual intervals, and explainability assets) with SHA256 integrity manifest.
 * **Clean-Download & Parity Verification**: Independent clean-download from Hopsworks into an isolated directory verified exact SHA256 matches across all files, standalone loadability, and 0.00000000 maximum absolute prediction error across all 72 horizons (including boundary horizons h1, h6, h7, h24, h37, h38, h39, h72) and explainability parity on h1, h24, h72.
@@ -120,7 +128,7 @@ Based on the final out-of-time test across 9,311 samples (2025-06-07 to 2026-08-
   * h+72 RMSE = 77.43
 * **Benchmark Comparison**: Beats Naive Persistence (RMSE 85.35) by 11.06% relative RMSE reduction.
 * **Walk-forward Validation**: 4/4 temporal folds won against Naive Persistence, with a mean relative gain of 24.46% (mean RMSE 83.44 vs 110.46).
-* **Test Suite**: 403 automated tests passing across 32 test modules (72.70% code coverage).
+* **Test Suite**: 418 automated tests passing across 33 test modules (73.43% code coverage).
 
 
 ## REST API Endpoints

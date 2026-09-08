@@ -493,8 +493,10 @@ class FeatureStoreTrainingLoader:
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
         """Filter dataset to observations strictly before the protected holdout boundary.
 
-        The 2025-06-07 through 2026-08-28 production holdout is strictly preserved and
-        untouched for EXP-019 reference metrics.
+        Candidate development is restricted to observations before 2025-06-07T00:00:00Z.
+        The post-cutoff/quarantined region (observations on or after 2025-06-07) contains
+        the formal protected 9,311-sample final test set (2025-06-07 through 2026-08-28)
+        plus later accumulated observations, and is preserved completely untouched.
 
         Args:
             df: Cleaned chronological DataFrame.
@@ -504,7 +506,7 @@ class FeatureStoreTrainingLoader:
         """
         pre_holdout_mask = df["dt"] < self.HOLDOUT_START_DT
         df_dev = df[pre_holdout_mask].copy().reset_index(drop=True)
-        holdout_count = int((~pre_holdout_mask).sum())
+        post_cutoff_count = int((~pre_holdout_mask).sum())
 
         if len(df_dev) == 0:
             raise ValidationError("No observations found before protected holdout boundary (2025-06-07T00:00:00Z).")
@@ -513,7 +515,13 @@ class FeatureStoreTrainingLoader:
             "holdout_start_dt": self.HOLDOUT_START_DT,
             "holdout_start_utc": pd.to_datetime(self.HOLDOUT_START_DT, unit="s", utc=True).isoformat(),
             "development_sample_count": len(df_dev),
-            "protected_holdout_sample_count": holdout_count,
+            "protected_holdout_sample_count": post_cutoff_count,
+            "post_cutoff_quarantined_sample_count": post_cutoff_count,
+            "formal_protected_test_sample_count": 9311,
+            "post_cutoff_quarantined_region_note": (
+                "Contains formal 9,311-sample protected final test set (2025-06-07 to 2026-08-28) "
+                "plus later accumulated observations."
+            ),
             "development_earliest_dt": int(df_dev["dt"].min()),
             "development_latest_dt": int(df_dev["dt"].max()),
             "development_earliest_utc": pd.to_datetime(df_dev["dt"].min(), unit="s", utc=True).isoformat(),
@@ -522,7 +530,7 @@ class FeatureStoreTrainingLoader:
         }
         logger.info(
             f"Holdout boundary applied: {len(df_dev)} development samples (< 2025-06-07), "
-            f"{holdout_count} samples preserved in untouched production holdout."
+            f"{post_cutoff_count} samples preserved in untouched post-cutoff/quarantined region."
         )
         return df_dev, meta
 
