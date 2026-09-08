@@ -128,7 +128,7 @@ Based on the final out-of-time test across 9,311 samples (2025-06-07 to 2026-08-
   * h+72 RMSE = 77.43
 * **Benchmark Comparison**: Beats Naive Persistence (RMSE 85.35) by 11.06% relative RMSE reduction.
 * **Walk-forward Validation**: 4/4 temporal folds won against Naive Persistence, with a mean relative gain of 24.46% (mean RMSE 83.44 vs 110.46).
-* **Test Suite**: 458 automated tests passing across 35 test modules (74.00% code coverage).
+* **Test Suite**: 459 automated tests passing across 35 test modules (74.00% code coverage).
 
 
 ## REST API Endpoints
@@ -191,8 +191,8 @@ Pearls-AQI-Predictor/
 │   ├── inference/            # Predictor, explainer, runtime resolver, post-processor
 │   ├── api/                  # Flask REST API blueprint & app factory
 │   └── dashboard/            # Streamlit frontend application & components
-├── tests/                    # 28 test modules + conftest (355 tests)
-├── .github/workflows/        # CI, hourly ingestion, weekly evaluation
+├── tests/                    # 35 test modules + conftest (459 tests)
+├── .github/workflows/        # CI, hourly feature ingestion, daily candidate training
 ├── requirements.txt          # Production runtime dependencies
 ├── requirements-dev.txt      # Offline training, research & testing dependencies
 ├── .python-version           # Pinned Python 3.10.14

@@ -625,4 +625,96 @@ The training workflow (`.github/workflows/training_pipeline.yml`) has been updat
 * **Artifact Retention**: Automatically uploads `data/models/candidates/` as a workflow artifact with 14-day retention.
 * **Workflow Dispatch**: The daily candidate training pipeline is configured to run daily and its exact production path has been verified through `workflow_dispatch` with `candidate_family` (`ridge`, `hybrid`, `lightgbm`, `random_forest`) and `dry_run` boolean flags.
 
+---
+
+## 25. High-Severity / Hazardous AQI Alert System
+
+### 25.1 Centralized Classification Architecture & Single Source of Truth
+The alerting layer was implemented as an authoritative, centralized module in `src/inference/alerting.py`. A core design tenet was eliminating divergent threshold implementations between backend API responses, frontend visualizations, and domain category definitions.
+
+To avoid contradictions between floating-point predictions and integer EPA category breakpoints, the alerting system enforces the single-path pipeline:
+$$\text{numeric AQI} \longrightarrow \text{get\_aqi\_category()} \longrightarrow \text{category} \longrightarrow \text{classify\_category\_alert()}$$
+
+Because `get_aqi_category()` rounds raw float AQI values to the nearest integer prior to range evaluation, evaluating alerts directly from the resulting category guarantees that the displayed category, hex color, alert level, and severity rank are mathematically locked across all system interfaces.
+
+### 25.2 Exact Category Boundaries & Severity Mapping
+The centralized schema (`CATEGORY_TO_ALERT_CONFIG`) maps each official EPA category to a normalized severity rank (0 to 5) and alert level:
+
+| EPA AQI Range | EPA Category | Alert Level | Severity Rank | Active Alert | Threshold | Official Color |
+| :--- | :--- | :--- | :---: | :---: | :---: | :--- |
+| **0 – 50** | Good | `none` | 0 | False | None | `#00E400` |
+| **51 – 100** | Moderate | `none` | 1 | False | None | `#FFFF00` |
+| **101 – 150** | Unhealthy for Sensitive Groups | `advisory` | 2 | True | 101.0 | `#FF7E00` |
+| **151 – 200** | Unhealthy | `warning` | 3 | True | 151.0 | `#FF0000` |
+| **201 – 300** | Very Unhealthy | `severe` | 4 | True | 201.0 | `#8F3F97` |
+| **301 – 500+** | Hazardous | `hazardous` | 5 | True | 301.0 | `#7E0023` |
+
+Extreme predicted AQI values exceeding 500 are preserved as unclipped floating-point numbers and mapped into the Hazardous tier (severity rank 5).
+
+### 25.3 Current Observation vs Forecast Trajectory Alert Distinction
+To provide transparent public risk communication, the system strictly distinguishes between *current observed conditions* and *predicted future conditions*:
+* **Current Observations**: Evaluated by `evaluate_current_alert()`, returning:
+  `"Current observed air quality in Lahore is [X] AQI ([Category]). [Category-level health advisory text]"`
+* **Forecast Trajectory**: Evaluated by `evaluate_forecast_alerts()` scanning all 72 horizons, phrasing alerts with scientific calibration:
+  `"The model forecasts [Level] air quality conditions within the next 72 hours (Peak AQI [X] at +[H]h). First enters [Level] range at +[H]h. A total of [N] forecast hours are in the [Level] range."`
+
+This ensures that model predictions are never conflated with observed real-time sensor measurements.
+
+### 25.4 Multi-Horizon Scanning: First Threshold Crossings & Horizon Counts
+The multi-horizon scanner sequentially examines the 72-hour forecast sequence, capturing:
+* **Peak Event**: `peak_aqi`, `peak_horizon`, `peak_timestamp`, and `peak_category`.
+* **First Crossings**: Captures the earliest horizon and timestamp where the forecast enters or exceeds each severity tier:
+  * `first_advisory_horizon` & `first_advisory_timestamp` ($\text{rank} \ge 2$, AQI $\ge 101$)
+  * `first_unhealthy_horizon` & `first_unhealthy_timestamp` ($\text{rank} \ge 3$, AQI $\ge 151$)
+  * `first_very_unhealthy_horizon` & `first_very_unhealthy_timestamp` ($\text{rank} \ge 4$, AQI $\ge 201$)
+  * `first_hazardous_horizon` & `first_hazardous_timestamp` ($\text{rank} \ge 5$, AQI $\ge 301$)
+* **Category-Specific Counts**: Computes non-overlapping hourly duration counts for each tier:
+  * `advisory_horizon_count` ($\text{rank} == 2$)
+  * `unhealthy_horizon_count` ($\text{rank} == 3$)
+  * `very_unhealthy_horizon_count` ($\text{rank} == 4$)
+  * `hazardous_horizon_count` ($\text{rank} \ge 5$)
+  * `severe_or_higher_horizon_count`: Combined sum of Very Unhealthy and Hazardous hours ($\text{rank} \ge 4$).
+
+### 25.5 Stale Telemetry and Bootstrap Fallback Handling
+Alert evaluations independently preserve and propagate data provenance:
+* Both `evaluate_current_alert()` and `evaluate_forecast_alerts()` accept `data_is_stale`, `feature_source`, and `fallback_active`.
+* When telemetry is historical ($>3$ hours old), alerts remain numerically valid and categorized, but the system concurrently renders prominent telemetry freshness notices.
+* Dynamic cache refresh updates `data_is_stale` on every cached response, ensuring that aging cached forecasts automatically reflect staleness without requiring re-inference.
+
+### 25.6 Empirical Upper-Bound Uncertainty Auditing
+In addition to point forecasts, the scanner audits the 90th percentile empirical prediction error upper bounds (`error_upper` derived from walk-forward residual quantiles):
+* If `error_upper >= 301.0` at any horizon while the expected point forecast remains below Very Unhealthy ($<201$), `upper_interval_crosses_hazardous` is set to `True`.
+* The dashboard displays an uncertainty notice:
+  `"Uncertainty Notice: The 90th percentile empirical error interval crosses the Hazardous threshold (>300 AQI) at one or more horizons, indicating extreme air pollution tail risk. Monitor ongoing hourly telemetry updates."`
+
+### 25.7 REST API Contract Integration
+The Flask API incorporates the alert contract without route proliferation:
+* **`GET /api/current`**: Enriched with `alert_level`, `severity_rank`, and the complete `alert` dictionary.
+* **`GET /api/forecast`**: Enriched with `forecast_alert` at the root response level and within `summary`, while each point in `forecasts` includes `alert_level` and `severity_rank`.
+* **Legacy Backward Compatibility**: Retains `high_severity` ($>200$), `hazardous` ($>300$), `has_high_severity`, `has_hazardous`, and `highest_alert_level` to ensure existing API consumers experience zero breaking changes.
+
+### 25.8 Streamlit Dashboard Integration
+* **Prioritized Top-Level Banners (`render_alert_banners`)**:
+  1. Current Severe / Hazardous emergency banner (`st.error`)
+  2. Forecast Severe / Hazardous trajectory banner (`st.error`)
+  3. Stale telemetry notice (`st.warning`, displayed alongside severe alerts when data is historical)
+  4. Unhealthy warning / Advisory banners (`st.warning` / `st.info`)
+  5. Empirical error upper bound tail risk notice (`st.info`)
+* **Sidebar Integration (`render_sidebar`)**: Synchronized to consume `summary["forecast_alert"]`, displaying color-coded status badges and first-crossing horizon offsets.
+* **Interactive Chart Reference Lines**: `build_forecast_figure` renders dashed horizontal lines at exact EPA boundaries: `151` (Unhealthy, red), `201` (Very Unhealthy, purple), and `301` (Hazardous, maroon).
+
+### 25.9 Automated Test Suite & Coverage
+The test suite was expanded with 41 new unit and regression tests:
+* `tests/test_alerting.py` (33 tests, 99% coverage): Boundary testing across 0..650 AQI, float rounding, sequence simulations, and provenance flags.
+* `tests/test_dashboard_alerts.py` (7 tests): Banner hierarchy, sidebar rendering, and 151/201/301 reference line verification.
+* `tests/test_dashboard.py` (17 tests): Full component rendering, app regression test verifying `observed_at` and `forecast_origin` fallback resolution without `NameError`.
+* **Overall Suite**: **459 passed tests** across 35 test modules, achieving **74.00% total code coverage**.
+
+### 25.10 Production Verification & Immutability Audit
+* **Live Render API (`https://aqi-forecasting-xyyb.onrender.com/api`)**: Verified live `/api/health` (healthy), `/api/current` (returns `alert` with live Hopsworks provenance), `/api/forecast` (returns `forecast_alert` with 58 Unhealthy hours, first at +6h), `/api/model/info` (EXP-019), and `/api/explain?horizon=24`.
+* **Live Streamlit App (`https://aqi-forecasting.streamlit.app`)**: Verified live HTTP 200 and script execution without runtime exceptions.
+* **Asset Immutability**: All 4 authoritative production assets in `data/runtime/production/` verified 100% byte-for-byte identical (`production_hybrid_model.joblib`: `F51D2EFF...`, `feature_scaler_v2_weather.joblib`: `9CE7E9FC...`, `feature_schema_v2_weather.json`: `38A5FDEA...`, `empirical_error_intervals.json`: `DBA4571E...`).
+* **Model Registry Audit**: Hopsworks registry `pearls_aqi_production_champion` verified with exactly 1 version (`version 1`, ID `pearls_aqi_production_champion_1`) and 0 candidate models.
+
+
 

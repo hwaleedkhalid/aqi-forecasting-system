@@ -302,3 +302,51 @@ class TestDashboardComponents:
             main()
             mock_err.assert_called_once()
 
+    def test_app_main_metadata_row_and_fallbacks_regression(self):
+        """Regression test ensuring observed_at and forecast_origin resolve correctly with realistic REST API payloads without NameError."""
+        from src.dashboard.app import main
+
+        mock_obs = {
+            "current_aqi": 120.0,
+            "category": "Unhealthy for Sensitive Groups",
+            "input_observed_at": "2026-09-08T19:00:00+00:00",
+            "alert": {"level": "advisory", "message": "Advisory"},
+        }
+        mock_forecast = {
+            "forecast_origin": "2026-09-08T19:00:00+00:00",
+            "input_observed_at": "2026-09-08T19:00:00+00:00",
+            "generated_at": "2026-09-09T00:20:00+00:00",
+            "inference_latency_ms": 15.2,
+            "forecast_alert": {"highest_level": "warning", "message": "Warning"},
+            "forecasts": [{"horizon": 1, "forecast_time": "2026-09-08T20:00:00+00:00", "aqi": 125.0, "category": "Unhealthy for Sensitive Groups", "error_lower": 100.0, "error_upper": 150.0}],
+            "summary": {"forecast_alert": {"highest_level": "warning"}},
+        }
+        mock_model_info = {"model_id": "EXP-019", "status": "validated_champion"}
+
+        # Delete forecast_origin to test fallback resolution to observed_at
+        mock_forecast_no_origin = dict(mock_forecast)
+        del mock_forecast_no_origin["forecast_origin"]
+
+        with (
+            patch("streamlit.set_page_config"),
+            patch("streamlit.title"),
+            patch("streamlit.caption"),
+            patch("streamlit.columns", side_effect=lambda n: [MagicMock()]*n if isinstance(n, int) else [MagicMock()]*len(n)),
+            patch("streamlit.slider", return_value=24),
+            patch("streamlit.button", return_value=False),
+            patch("streamlit.spinner"),
+            patch("streamlit.markdown"),
+            patch("streamlit.subheader"),
+            patch("streamlit.plotly_chart"),
+            patch("src.dashboard.data_client.DashboardDataClient.fetch_current", return_value=(mock_obs, "REST API")),
+            patch("src.dashboard.data_client.DashboardDataClient.fetch_forecast", return_value=(mock_forecast_no_origin, "REST API")),
+            patch("src.dashboard.data_client.DashboardDataClient.fetch_model_info", return_value=(mock_model_info, "REST API")),
+            patch("src.dashboard.data_client.DashboardDataClient.fetch_explain", return_value=({}, "REST API")),
+            patch("src.dashboard.app.render_metadata_header") as mock_render_meta,
+        ):
+            main()
+            mock_render_meta.assert_called_once()
+            call_args = mock_render_meta.call_args[0]
+            assert call_args[0] == "2026-09-08T19:00:00+00:00"
+
+

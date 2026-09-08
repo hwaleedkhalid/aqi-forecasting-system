@@ -14,7 +14,7 @@ from typing import Any
 
 from src.feature_pipeline.aqi_calculator import get_aqi_category
 
-# Official US EPA Health Advisories by Category
+# Category-level health advisory text
 HEALTH_ADVISORIES: dict[str, str] = {
     "Good": "Air quality is satisfactory and air pollution poses little or no risk.",
     "Moderate": "Air quality is acceptable; unusually sensitive individuals should consider reducing prolonged outdoor exertion.",

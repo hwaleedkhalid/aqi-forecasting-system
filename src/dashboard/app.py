@@ -109,6 +109,10 @@ def main() -> None:
     render_alert_banners(obs_data, forecast_data)
 
     # 2. Metadata & Provenance Row
+    observed_at = forecast_data.get(
+        "input_observed_at",
+        obs_data.get("input_observed_at", "Unknown"),
+    )
     forecast_origin = forecast_data.get("forecast_origin", observed_at)
     generated_at = forecast_data.get("generated_at", "Unknown")
     latency_ms = forecast_data.get("inference_latency_ms", 0.0)
