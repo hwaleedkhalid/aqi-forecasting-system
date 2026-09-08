@@ -19,7 +19,11 @@ from src.config import (
     PROCESSED_DATA_DIR,
     TRAIN_TEST_SPLIT_RATIO,
 )
-from src.exceptions import ValidationError
+from src.exceptions import FeatureStoreError, ValidationError
+from src.feature_pipeline.hopsworks_integration import (
+    HopsworksFeatureStoreConnector,
+    load_canonical_feature_names,
+)
 from src.logger import logger
 
 
@@ -310,3 +314,362 @@ class DatasetBuilder:
         )
 
         return summary
+
+
+class FeatureStoreTrainingLoader:
+    """Retrieves, validates, and prepares historical training data from Hopsworks Feature Store.
+
+    Enforces:
+    - Bounded query timeouts on Arrow Flight offline reads.
+    - Auditable duplicate detection (identical duplicates deduplicated; conflicting duplicates fail validation).
+    - Preservation of protected holdout (candidate training/validation restricted strictly < 2025-06-07T00:00:00Z).
+    - Exact physical timestamp semantics for multi-horizon targets (T + h*3600; drop if missing).
+    - Strict chronological train/validation splitting with anti-leakage embargo gap.
+    """
+
+    HOLDOUT_START_DT: int = 1749254400  # 2025-06-07T00:00:00+00:00 UTC
+
+    def __init__(
+        self,
+        connector: HopsworksFeatureStoreConnector | None = None,
+        location_id: str = "lahore",
+        forecast_horizons: int = FORECAST_HORIZONS,
+        read_timeout: int = 300,
+    ) -> None:
+        """Initialize FeatureStoreTrainingLoader.
+
+        Args:
+            connector: Hopsworks connector instance (lazily initialized if None).
+            location_id: Location primary key (default: 'lahore').
+            forecast_horizons: Number of forecasting steps (default: 72).
+            read_timeout: Bounded timeout in seconds for Arrow Flight query (default: 300).
+        """
+        self.connector = connector or HopsworksFeatureStoreConnector(location_id=location_id)
+        self.location_id = location_id
+        self.forecast_horizons = forecast_horizons
+        self.read_timeout = read_timeout
+        self.canonical_features = load_canonical_feature_names()
+
+    def fetch_offline_data(self) -> tuple[pd.DataFrame, dict[str, Any]]:
+        """Fetch full historical feature group from Hopsworks offline store with bounded timeout.
+
+        Returns:
+            Tuple of (DataFrame from offline store, query metadata dictionary).
+
+        Raises:
+            FeatureStoreError: If credentials fail, query times out, or dataset is empty.
+        """
+        if not self.connector.is_cloud_configured():
+            raise FeatureStoreError("Hopsworks credentials not configured for offline training retrieval.")
+
+        logger.info(
+            f"Querying Hopsworks offline Feature Store for location_id='{self.location_id}' "
+            f"(feature_group='{self.connector.feature_group_name}', version={self.connector.feature_group_version}, "
+            f"bounded_timeout={self.read_timeout}s)..."
+        )
+
+        try:
+            fs = self.connector._login()
+            fg = fs.get_feature_group(
+                name=self.connector.feature_group_name,
+                version=self.connector.feature_group_version,
+            )
+            query = fg.select_all().filter(fg.location_id == self.location_id)
+            read_opts = {"timeout": self.read_timeout}
+            raw_df = query.read(read_options=read_opts)
+        except Exception as e:
+            logger.error(f"Hopsworks offline Feature Store read failed: {e}")
+            raise FeatureStoreError(f"Hopsworks offline read failed or timed out: {e}") from e
+
+        if raw_df is None or len(raw_df) == 0:
+            raise FeatureStoreError("Hopsworks query returned 0 records.")
+
+        # Inspect latest materialized observation in offline store
+        latest_mat_dt = int(raw_df["dt"].max())
+        earliest_mat_dt = int(raw_df["dt"].min())
+        now_epoch = int(pd.Timestamp.now(tz="UTC").timestamp())
+        mat_age_hours = round((now_epoch - latest_mat_dt) / 3600.0, 2)
+
+        meta = {
+            "source": "Hopsworks Feature Store (Offline Store)",
+            "feature_group": self.connector.feature_group_name,
+            "feature_group_version": self.connector.feature_group_version,
+            "location_id": self.location_id,
+            "raw_row_count": len(raw_df),
+            "earliest_materialized_dt": earliest_mat_dt,
+            "latest_materialized_dt": latest_mat_dt,
+            "materialized_age_hours": mat_age_hours,
+            "earliest_materialized_utc": pd.to_datetime(earliest_mat_dt, unit="s", utc=True).isoformat(),
+            "latest_materialized_utc": pd.to_datetime(latest_mat_dt, unit="s", utc=True).isoformat(),
+        }
+        logger.info(
+            f"Successfully retrieved {len(raw_df)} records from offline Feature Store. "
+            f"Latest materialized dt={latest_mat_dt} ({mat_age_hours}h ago)."
+        )
+        return raw_df, meta
+
+    def audit_and_clean_data(self, df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+        """Audit schema, validate numerical finiteness, and handle duplicates auditably.
+
+        Args:
+            df: Raw DataFrame retrieved from Feature Store or offline storage.
+
+        Returns:
+            Tuple of (cleaned DataFrame sorted by dt, audit report dictionary).
+
+        Raises:
+            ValidationError: If schema columns are missing, timestamps non-integral,
+                            conflicting duplicates exist, or NaN/Inf values present.
+        """
+        # 1. Verify location_id and all canonical features exist
+        missing = [c for c in self.canonical_features if c not in df.columns]
+        if missing:
+            raise ValidationError(
+                f"Feature Store schema error: missing canonical columns: {missing[:5]}"
+            )
+
+        # 2. Validate dt column
+        dt_numeric = pd.to_numeric(df["dt"], errors="coerce")
+        if dt_numeric.isna().any():
+            raise ValidationError("Non-numeric or NaN values detected in event_time column 'dt'")
+        if not np.all(dt_numeric % 1 == 0):
+            raise ValidationError("Fractional (non-integral) timestamps detected in event_time column 'dt'")
+
+        df_work = df.copy()
+        df_work["dt"] = dt_numeric.astype(np.int64)
+
+        # 3. Auditable duplicate handling on (location_id, dt)
+        dup_subset = ["location_id", "dt"] if "location_id" in df_work.columns else ["dt"]
+        dup_mask = df_work.duplicated(subset=dup_subset, keep=False)
+        identical_dups_dropped = 0
+
+        if dup_mask.any():
+            dup_rows = df_work[dup_mask]
+            # Check if duplicates are identical across all 114 canonical features
+            dup_features_mask = df_work.duplicated(subset=self.canonical_features, keep=False)
+            conflicting = dup_rows[~dup_features_mask.loc[dup_rows.index]]
+            if len(conflicting) > 0:
+                conflicting_dts = list(conflicting["dt"].unique()[:5])
+                raise ValidationError(
+                    f"Conflicting duplicate records detected for entity key {dup_subset} "
+                    f"at timestamps {conflicting_dts}. Failing validation."
+                )
+
+            # Identical duplicates: deterministically drop duplicates
+            initial_count = len(df_work)
+            df_work = df_work.drop_duplicates(subset=dup_subset, keep="first").reset_index(drop=True)
+            identical_dups_dropped = initial_count - len(df_work)
+            logger.info(f"Auditable deduplication: dropped {identical_dups_dropped} identical duplicate rows.")
+
+        # 4. Numerical finiteness validation across all 114 canonical features
+        feat_df = df_work[self.canonical_features]
+        nan_count = int(feat_df.isna().sum().sum())
+        if nan_count > 0:
+            nan_cols = feat_df.columns[feat_df.isna().any()].tolist()
+            raise ValidationError(f"NaN values detected in canonical features: {nan_cols[:5]}")
+
+        inf_count = 0
+        for col in self.canonical_features:
+            if np.issubdtype(feat_df[col].dtype, np.number):
+                inf_count += int(np.isinf(feat_df[col]).sum())
+        if inf_count > 0:
+            raise ValidationError(f"Infinite values detected in canonical features (count={inf_count}).")
+
+        # 5. Sort strictly chronologically by dt
+        df_sorted = df_work.sort_values("dt").reset_index(drop=True)
+
+        audit_report = {
+            "cleaned_row_count": len(df_sorted),
+            "identical_duplicates_dropped": identical_dups_dropped,
+            "earliest_dt": int(df_sorted["dt"].min()),
+            "latest_dt": int(df_sorted["dt"].max()),
+            "earliest_utc": pd.to_datetime(df_sorted["dt"].min(), unit="s", utc=True).isoformat(),
+            "latest_utc": pd.to_datetime(df_sorted["dt"].max(), unit="s", utc=True).isoformat(),
+        }
+        return df_sorted, audit_report
+
+    def filter_candidate_development_data(
+        self, df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
+        """Filter dataset to observations strictly before the protected holdout boundary.
+
+        The 2025-06-07 through 2026-08-28 production holdout is strictly preserved and
+        untouched for EXP-019 reference metrics.
+
+        Args:
+            df: Cleaned chronological DataFrame.
+
+        Returns:
+            Tuple of (pre-holdout development DataFrame, holdout isolation metadata).
+        """
+        pre_holdout_mask = df["dt"] < self.HOLDOUT_START_DT
+        df_dev = df[pre_holdout_mask].copy().reset_index(drop=True)
+        holdout_count = int((~pre_holdout_mask).sum())
+
+        if len(df_dev) == 0:
+            raise ValidationError("No observations found before protected holdout boundary (2025-06-07T00:00:00Z).")
+
+        meta = {
+            "holdout_start_dt": self.HOLDOUT_START_DT,
+            "holdout_start_utc": pd.to_datetime(self.HOLDOUT_START_DT, unit="s", utc=True).isoformat(),
+            "development_sample_count": len(df_dev),
+            "protected_holdout_sample_count": holdout_count,
+            "development_earliest_dt": int(df_dev["dt"].min()),
+            "development_latest_dt": int(df_dev["dt"].max()),
+            "development_earliest_utc": pd.to_datetime(df_dev["dt"].min(), unit="s", utc=True).isoformat(),
+            "development_latest_utc": pd.to_datetime(df_dev["dt"].max(), unit="s", utc=True).isoformat(),
+            "holdout_preserved_untouched": True,
+        }
+        logger.info(
+            f"Holdout boundary applied: {len(df_dev)} development samples (< 2025-06-07), "
+            f"{holdout_count} samples preserved in untouched production holdout."
+        )
+        return df_dev, meta
+
+    def construct_physical_targets(
+        self,
+        df: pd.DataFrame,
+        target_col: str = "epa_aqi",
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Construct h1-h72 targets using exact physical timestamp semantics.
+
+        For an observation at timestamp T, requires an actual observation at exactly
+        T + h * 3600 seconds. Missing target timestamps cleanly drop the sample.
+        Never interpolates target AQI and never relies on row position alone.
+
+        Args:
+            df: Input feature DataFrame with integer 'dt' column and target_col.
+            target_col: Target AQI column name (default: 'epa_aqi').
+
+        Returns:
+            Tuple of (df_valid_features, df_valid_targets).
+        """
+        if target_col not in df.columns:
+            raise ValidationError(f"Target column '{target_col}' not found in DataFrame.")
+
+        dt_arr = df["dt"].astype(np.int64).values
+        n_rows = len(df)
+        ts_to_target = dict(zip(dt_arr, df[target_col].astype(np.float64)))
+
+        target_matrix = np.full((n_rows, self.forecast_horizons), np.nan, dtype=np.float32)
+        valid_mask = np.ones(n_rows, dtype=bool)
+
+        for h in range(1, self.forecast_horizons + 1):
+            step_seconds = h * 3600
+            target_timestamps = dt_arr + step_seconds
+            h_idx = h - 1
+            for i, target_ts in enumerate(target_timestamps):
+                if not valid_mask[i]:
+                    continue
+                val = ts_to_target.get(target_ts)
+                if val is None or np.isnan(val):
+                    valid_mask[i] = False
+                else:
+                    target_matrix[i, h_idx] = val
+
+        valid_indices = np.where(valid_mask)[0]
+        df_valid_features = df.iloc[valid_indices].copy().reset_index(drop=True)
+        target_cols = [f"target_h{h}" for h in range(1, self.forecast_horizons + 1)]
+        df_valid_targets = pd.DataFrame(target_matrix[valid_indices], columns=target_cols)
+
+        dropped_count = n_rows - len(df_valid_features)
+        logger.info(
+            f"Physical target construction ({self.forecast_horizons}h): {len(df_valid_features)} valid samples "
+            f"retained (dropped {dropped_count} samples missing exact physical target timestamps)."
+        )
+        return df_valid_features, df_valid_targets
+
+    def split_chronological_with_embargo(
+        self,
+        df_features: pd.DataFrame,
+        df_targets: pd.DataFrame,
+        train_ratio: float = 0.8,
+    ) -> dict[str, Any]:
+        """Perform chronological train/val split with strict anti-leakage embargo.
+
+        Enforces:
+            min(val_input_dt) > max(train_input_dt) + 72h
+            max_train_target_dt < min_val_input_dt
+
+        Args:
+            df_features: Feature DataFrame with 'dt' column.
+            df_targets: Multi-output target DataFrame.
+            train_ratio: Chronological train split fraction (default: 0.80).
+
+        Returns:
+            Dictionary containing train and val splits and leakage audit metadata.
+        """
+        total_samples = len(df_features)
+        split_idx = int(total_samples * train_ratio)
+        split_dt = int(df_features["dt"].iloc[split_idx])
+
+        # Embargo gap: last allowed training sample timestamp must be strictly before split_dt - 72h
+        # On an hourly grid this requires at least a 73-hour separation between final train input and first val input
+        embargo_seconds = self.forecast_horizons * 3600
+        train_cutoff_dt = split_dt - embargo_seconds - 3600
+
+        train_mask = df_features["dt"] <= train_cutoff_dt
+        val_mask = df_features["dt"] >= split_dt
+
+        df_train_feats = df_features.loc[train_mask].copy().reset_index(drop=True)
+        df_train_targets = df_targets.loc[train_mask].copy().reset_index(drop=True)
+
+        df_val_feats = df_features.loc[val_mask].copy().reset_index(drop=True)
+        df_val_targets = df_targets.loc[val_mask].copy().reset_index(drop=True)
+
+        max_train_input_dt = int(df_train_feats["dt"].max())
+        min_val_input_dt = int(df_val_feats["dt"].min())
+        max_train_target_dt = max_train_input_dt + embargo_seconds
+
+        # Strict Leakage Audit Checks
+        if not (min_val_input_dt > max_train_input_dt + embargo_seconds):
+            raise ValidationError(
+                f"Embargo rule violated: min_val_input_dt ({min_val_input_dt}) <= "
+                f"max_train_input_dt + 72h ({max_train_input_dt + embargo_seconds})"
+            )
+
+        if not (max_train_target_dt < min_val_input_dt):
+            raise ValidationError(
+                f"Temporal leakage detected: max_train_target_dt ({max_train_target_dt}) >= "
+                f"min_val_input_dt ({min_val_input_dt})"
+            )
+
+        separation_hours = round((min_val_input_dt - max_train_input_dt) / 3600.0, 2)
+        embargoed_samples = total_samples - (len(df_train_feats) + len(df_val_feats))
+
+        leakage_audit = {
+            "max_train_input_dt": max_train_input_dt,
+            "min_val_input_dt": min_val_input_dt,
+            "max_train_target_dt": max_train_target_dt,
+            "separation_hours": separation_hours,
+            "embargo_hours_required": self.forecast_horizons,
+            "leakage_rule_passed": True,
+            "max_train_target_lt_min_val_input": True,
+            "min_val_gt_max_train_plus_72h": True,
+            "embargoed_samples_count": embargoed_samples,
+            "train_sample_count": len(df_train_feats),
+            "val_sample_count": len(df_val_feats),
+            "train_period": {
+                "start_utc": pd.to_datetime(df_train_feats["dt"].min(), unit="s", utc=True).isoformat(),
+                "end_utc": pd.to_datetime(max_train_input_dt, unit="s", utc=True).isoformat(),
+            },
+            "val_period": {
+                "start_utc": pd.to_datetime(min_val_input_dt, unit="s", utc=True).isoformat(),
+                "end_utc": pd.to_datetime(df_val_feats["dt"].max(), unit="s", utc=True).isoformat(),
+            },
+        }
+
+        logger.info(
+            f"Leakage audit PASSED: train_end={leakage_audit['train_period']['end_utc']}, "
+            f"val_start={leakage_audit['val_period']['start_utc']} "
+            f"({separation_hours}h separation, {embargoed_samples} embargoed samples)."
+        )
+
+        return {
+            "X_train_df": df_train_feats,
+            "Y_train_df": df_train_targets,
+            "X_val_df": df_val_feats,
+            "Y_val_df": df_val_targets,
+            "leakage_audit": leakage_audit,
+        }
+

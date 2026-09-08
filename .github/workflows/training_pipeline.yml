@@ -1,26 +1,36 @@
-name: Candidate Model Evaluation & Stability Pipeline
+name: Daily Candidate Model Training & Evaluation Pipeline
 
 "on":
   schedule:
-    - cron: "23 2 * * 0"  # Weekly on Sundays at 02:23 UTC (avoids midnight 00:00 contention)
+    - cron: "45 2 * * *"  # Daily at 02:45 UTC (28m buffer after hourly ingestion at minute 17)
   workflow_dispatch:
     inputs:
-      candidate_tag:
-        description: "Identifier tag for candidate evaluation"
+      candidate_family:
+        description: "Candidate model family to train"
         required: false
-        type: string
-        default: "candidate-eval"
+        type: choice
+        options:
+          - "ridge"
+          - "hybrid"
+          - "lightgbm"
+          - "random_forest"
+        default: "ridge"
+      dry_run:
+        description: "Run data verification without model fitting"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-  group: model-evaluation-pipeline
+  group: model-training-pipeline
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  evaluate:
-    name: Candidate Model Evaluation & Stability Check
+  train_and_evaluate:
+    name: Daily Candidate Training & Evaluation
     runs-on: ubuntu-latest
 
     steps:
@@ -38,6 +48,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Validate Feature Store Secrets
+        run: |
+          if [ -z "${{ secrets.HOPSWORKS_API_KEY }}" ]; then
+            echo "::error::HOPSWORKS_API_KEY secret is required for Feature-Store-driven candidate training."
+            exit 1
+          fi
+
       - name: Seed Production Model From Runtime Assets
         run: |
           mkdir -p data/models
@@ -47,22 +64,36 @@ jobs:
         run: |
           sha256sum data/models/production_hybrid_model.joblib > /tmp/prod_model_hash_before.txt
 
-      - name: Run Candidate Model Evaluation
+      - name: Run Daily Candidate Training Pipeline
+        env:
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT || 'aqi_predictor_by_Waleed' }}
+          HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST || 'eu-west.cloud.hopsworks.ai' }}
         run: |
-          python -m src.training_pipeline.run_candidate_evaluation --output-dir data/models/candidate
+          FAMILY="${{ github.event.inputs.candidate_family || 'ridge' }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
 
-      - name: Assert Production Model Unmodified
+          CMD="python -m src.training_pipeline.run_daily_candidate --candidate-family $FAMILY --output-dir data/models/candidates"
+          if [ "$DRY_RUN" = "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
+
+          echo "Executing: $CMD"
+          $CMD
+
+      - name: Assert Production Champion Immutability
         run: |
           sha256sum data/models/production_hybrid_model.joblib > /tmp/prod_model_hash_after.txt
           diff /tmp/prod_model_hash_before.txt /tmp/prod_model_hash_after.txt || {
-            echo "::error::Invariant violation: Production champion artifact was modified!"
+            echo "::error::CRITICAL INVARIANT VIOLATION: Production champion artifact was modified!"
             exit 1
           }
+          echo "Production champion immutability verified: 100% byte-for-byte identical."
 
-      - name: Upload Candidate Evaluation & Diagnostic Artifacts
+      - name: Upload Candidate Artifacts and Evaluation Bundle
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: candidate-model-evaluation-reports
-          path: data/models/candidate/
+          path: data/models/candidates/
           retention-days: 14
