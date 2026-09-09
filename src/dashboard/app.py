@@ -30,11 +30,14 @@ if str(PROJECT_ROOT) not in sys.path:
 import streamlit as st
 
 from src.dashboard.components import (
+    build_aqi_gauge_figure,
     build_forecast_figure,
     render_alert_banners,
+    render_aqi_legend,
     render_cold_start_error,
     render_current_observation_card,
     render_explainability_section,
+    render_forecast_narrative_card,
     render_health_guidance,
     render_metadata_header,
     render_model_system_details,
@@ -44,7 +47,14 @@ from src.dashboard.components import (
 )
 from src.dashboard.data_client import DashboardDataClient
 from src.dashboard.styles import DASHBOARD_CSS
-from src.dashboard.ui_helpers import format_relative_age, safe_val
+from src.dashboard.ui_helpers import (
+    category_bg_color,
+    category_border_color,
+    category_color,
+    category_text_color,
+    format_relative_age,
+    safe_val,
+)
 from src.logger import logger
 
 
@@ -107,8 +117,8 @@ def render_app_header(
 def render_horizon_milestones(forecasts: list[dict]) -> None:
     """Render redesigned milestone cards for key forecast horizons.
 
-    Shows +1h, +12h, +24h, +48h, +72h with category-colored accent strip,
-    large AQI value, category label, and secondary empirical range.
+    Shows +1h, +12h, +24h, +48h, +72h with category-tinted background,
+    category accent strip, large AQI value, category label, and empirical range.
 
     Args:
         forecasts: List of forecast horizon dictionaries matching API contract.
@@ -130,7 +140,10 @@ def render_horizon_milestones(forecasts: list[dict]) -> None:
         category = item["category"]
         lower = item["error_lower"]
         upper = item["error_upper"]
-        color = item.get("color", "#9CA3AF")
+        accent = category_color(category)
+        bg = category_bg_color(category)
+        border = category_border_color(category)
+        text_col = category_text_color(category)
 
         aqi_str = f"{aqi_val:.0f}" if aqi_val is not None else "—"
         range_str = f"[{safe_val(lower, decimals=0)}, {safe_val(upper, decimals=0)}]"
@@ -138,12 +151,12 @@ def render_horizon_milestones(forecasts: list[dict]) -> None:
         with col:
             st.markdown(
                 f"""
-<div class="prl-milestone-card">
-  <div class="prl-milestone-accent" style="background:{color};"></div>
+<div class="prl-milestone-card" style="background:{bg};border:1px solid {border};">
+  <div class="prl-milestone-accent" style="background:{accent};"></div>
   <div class="prl-milestone-horizon">+{h}h</div>
   <div class="prl-milestone-aqi">{aqi_str}</div>
-  <div class="prl-milestone-cat" style="color:{color};">{category}</div>
-  <div class="prl-milestone-range">Error range: {range_str}</div>
+  <div class="prl-milestone-cat" style="color:{text_col};">{category}</div>
+  <div class="prl-milestone-range">Range: {range_str}</div>
 </div>
 """,
                 unsafe_allow_html=True,
@@ -164,6 +177,11 @@ def main() -> None:
             obs_data, current_source = client.fetch_current()
             forecast_data, forecast_source = client.fetch_forecast(force_refresh=force_refresh)
             model_info, _ = client.fetch_model_info()
+            # Fetch baseline explanation for human-readable card (+24h)
+            try:
+                explain_data_24, _ = client.fetch_explain(horizon=24, top_k=6)
+            except Exception:
+                explain_data_24 = {}
     except ConnectionError as e:
         logger.warning(f"Dashboard API connection error: {e}")
         render_app_header(age_hours=None)
@@ -186,7 +204,7 @@ def main() -> None:
     with hero_left:
         render_current_observation_card(obs_data)
     with hero_right:
-        render_72h_outlook_card(forecast_data)
+        render_72h_outlook_card(forecast_data, current_category=obs_data.get("category", ""))
 
     # ── 2. Compact alert / status area ────────────────────────────────────
     st.markdown("<div style='margin-top:14px;'></div>", unsafe_allow_html=True)
@@ -204,9 +222,10 @@ def main() -> None:
 
     st.divider()
 
-    # ── 3. 72-Hour AQI Forecast chart ─────────────────────────────────────
+    # ── 3. 72-Hour AQI Forecast chart & Legend ────────────────────────────
     st.markdown('<div class="prl-section-heading">72-Hour AQI Forecast</div>', unsafe_allow_html=True)
     st.caption("Hourly air quality outlook for Lahore · Empirical prediction intervals from walk-forward out-of-fold residuals")
+    render_aqi_legend()
 
     forecasts = forecast_data.get("forecasts", [])
     if forecasts:
@@ -217,6 +236,10 @@ def main() -> None:
         render_horizon_milestones(forecasts)
     else:
         st.info("No forecast horizon data available.")
+
+    # ── "Why this forecast?" Human-readable explanation card ──────────────
+    if explain_data_24:
+        render_forecast_narrative_card(explain_data_24, horizon=24)
 
     st.divider()
 
@@ -247,6 +270,7 @@ def main() -> None:
             step=1,
             help="Inspect SHAP feature attribution and persistence decomposition for any hourly horizon.",
         )
+
         with st.spinner(f"Computing SHAP attribution for horizon +{selected_horizon}h…"):
             explain_data, _ = client.fetch_explain(horizon=selected_horizon, top_k=10)
         render_explainability_section(explain_data)

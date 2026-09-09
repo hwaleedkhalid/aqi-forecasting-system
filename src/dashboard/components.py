@@ -30,17 +30,78 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.dashboard.ui_helpers import (
+    category_bg_color,
+    category_border_color,
+    category_card_class,
     category_color,
     category_icon,
+    category_solid_text_color,
     category_text_color,
     format_horizon_label,
     format_relative_age,
+    format_shap_narrative,
     format_stale_age,
     format_timestamp,
+    humanize_feature_name,
     safe_val,
     source_badge_class,
     source_display_name,
 )
+
+
+# ── Speedometer / AQI Gauge ──────────────────────────────────────────────────
+
+def build_aqi_gauge_figure(current_aqi: float | None, category: str = "") -> go.Figure:
+    """Build semi-circular Plotly speedometer/gauge for current AQI.
+
+    Shows 6 EPA ranges: Good (0-50), Moderate (51-100), Sensitive (101-150),
+    Unhealthy (151-200), Very Unhealthy (201-300), Hazardous (301-500).
+
+    Args:
+        current_aqi: Current AQI numeric value.
+        category: AQI category string for needle/bar accent color.
+
+    Returns:
+        Plotly Figure instance.
+    """
+    val = float(current_aqi) if current_aqi is not None else 0.0
+    accent = category_color(category)
+
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge",
+            value=val,
+            gauge=dict(
+                shape="angular",
+                axis=dict(
+                    range=[0, 500],
+                    tickmode="array",
+                    tickvals=[0, 50, 100, 150, 200, 300, 500],
+                    ticktext=["0", "50", "100", "150", "200", "300", "500"],
+                    tickfont=dict(size=9, color="#6B7280"),
+                ),
+                bar=dict(color=accent, thickness=0.3),
+                bgcolor="rgba(0,0,0,0.03)",
+                borderwidth=0,
+                steps=[
+                    dict(range=[0, 50], color="rgba(34, 197, 94, 0.40)"),
+                    dict(range=[50, 100], color="rgba(234, 179, 8, 0.40)"),
+                    dict(range=[100, 150], color="rgba(249, 115, 22, 0.40)"),
+                    dict(range=[150, 200], color="rgba(239, 68, 68, 0.40)"),
+                    dict(range=[200, 300], color="rgba(139, 92, 246, 0.40)"),
+                    dict(range=[300, 500], color="rgba(127, 29, 29, 0.40)"),
+                ],
+            ),
+        )
+    )
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=15, r=15, t=10, b=0),
+        height=140,
+    )
+    return fig
 
 
 # ── Forecast chart ────────────────────────────────────────────────────────────
@@ -50,6 +111,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
 
     Preserves all scientific content: point values, empirical error band,
     151 / 201 / 301 EPA threshold reference lines, UTC timestamps.
+    Adds subtle horizontal colored AQI category background zones.
 
     Args:
         forecasts: List of 72 forecast horizon dictionaries matching contract.
@@ -117,33 +179,51 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
     fig.add_hline(
         y=151,
         line_dash="dash",
-        line_color="#FF0000",
+        line_color="#EF4444",
         line_width=1.2,
         annotation_text="Unhealthy (151)",
         annotation_position="top left",
-        annotation_font=dict(color="#FF0000", size=9),
+        annotation_font=dict(color="#EF4444", size=9),
     )
     fig.add_hline(
         y=201,
         line_dash="dash",
-        line_color="#8F3F97",
+        line_color="#8B5CF6",
         line_width=1.2,
         annotation_text="Very Unhealthy (201)",
         annotation_position="top left",
-        annotation_font=dict(color="#8F3F97", size=9),
+        annotation_font=dict(color="#8B5CF6", size=9),
     )
     fig.add_hline(
         y=301,
         line_dash="dash",
-        line_color="#7E0023",
+        line_color="#7F1D1D",
         line_width=1.2,
         annotation_text="Hazardous (301)",
         annotation_position="top left",
-        annotation_font=dict(color="#7E0023", size=9),
+        annotation_font=dict(color="#7F1D1D", size=9),
     )
 
-    # 4. Layout
+    # 4. Background colored category bands (subtle opacity 0.04)
     max_val = max(max(uppers), max(aqis), 350.0)
+    zones = [
+        (0, 50, "rgba(34, 197, 94, 0.04)"),
+        (50, 100, "rgba(234, 179, 8, 0.04)"),
+        (100, 150, "rgba(249, 115, 22, 0.04)"),
+        (150, 200, "rgba(239, 68, 68, 0.04)"),
+        (200, 300, "rgba(139, 92, 246, 0.04)"),
+        (300, max(500.0, max_val + 20.0), "rgba(127, 29, 29, 0.04)"),
+    ]
+    for y0, y1, fill in zones:
+        fig.add_hrect(
+            y0=y0,
+            y1=y1,
+            fillcolor=fill,
+            line_width=0,
+            layer="below",
+        )
+
+    # 5. Layout
     fig.update_layout(
         paper_bgcolor="#FFFFFF",
         plot_bgcolor="#FAFAFA",
@@ -313,7 +393,7 @@ def render_alert_banners(obs_data: dict[str, Any], forecast_data: dict[str, Any]
 # ── Current observation card (LEFT hero column) ───────────────────────────────
 
 def render_current_observation_card(obs: dict[str, Any]) -> None:
-    """Render the left hero column: large current AQI, category, dominant pollutant, freshness.
+    """Render the left hero column: large current AQI, gauge, category, factors, freshness.
 
     Args:
         obs: Latest observation dictionary matching API contract.
@@ -321,12 +401,13 @@ def render_current_observation_card(obs: dict[str, Any]) -> None:
     aqi_val = obs.get("current_aqi", 0.0)
     category = obs.get("category", "Unknown")
     color = obs.get("color") or category_color(category)
-    text_col = category_text_color(category)
+    solid_text_col = category_solid_text_color(category)
     dominant = obs.get("dominant_pollutant", "pm2_5")
     feature_source = obs.get("feature_source", "")
     fallback_active = obs.get("fallback_active", False)
     is_stale = obs.get("is_stale", False)
     age_hours = obs.get("input_age_hours")
+    card_cls = category_card_class(category)
 
     badge_class = source_badge_class(feature_source, fallback_active, is_stale)
     source_name = source_display_name(feature_source, fallback_active, is_stale)
@@ -338,30 +419,60 @@ def render_current_observation_card(obs: dict[str, Any]) -> None:
 
     aqi_display = f"{aqi_val:.0f}" if aqi_val is not None else "—"
 
+    # Extract dominant pollutant concentration and weather
+    pollutants = obs.get("pollutants", {})
+    weather = obs.get("weather", {})
+    dom_key = dominant.lower().replace(".", "_")
+    dom_val = pollutants.get(dom_key, pollutants.get("pm2_5"))
+    dom_val_str = safe_val(dom_val, "µg/m³", 1)
+    temp_str = safe_val(weather.get("temperature_2m"), "°C", 1)
+    wind_str = safe_val(weather.get("wind_speed_10m"), "m/s", 1)
+
+    icon = category_icon(category)
+    gauge_fig = build_aqi_gauge_figure(aqi_val, category)
+
     st.markdown(
         f"""
-<div class="prl-card">
-  <div class="prl-card-title">Current Air Quality · Lahore</div>
-  <div class="prl-hero-aqi">{aqi_display}<span class="prl-hero-aqi-unit">AQI</span></div>
-  <span class="prl-category-pill" style="background:{color};color:{text_col};">{category}</span>
-  <div class="prl-hero-meta">
-    <b>Dominant pollutant:</b> {dominant.upper().replace("_", ".")}<br>
-    {freshness_line}
+<div class="{card_cls}">
+  <div class="prl-hero-top">
+    <div>
+      <div class="prl-card-title">Current Air Quality · Lahore</div>
+      <div class="prl-hero-aqi">{aqi_display}<span class="prl-hero-aqi-unit">AQI</span></div>
+    </div>
+    <div>
+      <span class="prl-category-pill" style="background:{color};color:{solid_text_col};">{icon} {category}</span>
+    </div>
   </div>
-  <span class="{badge_class}">{source_name}</span>
+
+  <div class="prl-observed-factors">
+    <div class="prl-observed-factors-title">What is affecting air quality now?</div>
+    <b>Primary factor:</b> {dominant.upper().replace("_", ".")} ({dom_val_str})<br>
+    <b>Weather telemetry:</b> Temp {temp_str} · Wind {wind_str}
+  </div>
+
+  <div class="prl-hero-meta">
+    {freshness_line}<br>
+    <span class="{badge_class}">{source_name}</span>
+  </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
+    st.plotly_chart(gauge_fig, use_container_width=True, config={"displayModeBar": False})
+
 
 
 # ── 72h Outlook card (RIGHT hero column) ─────────────────────────────────────
 
-def render_72h_outlook_card(forecast_data: dict[str, Any]) -> None:
-    """Render the right hero column: 72-hour outlook summary.
+def render_72h_outlook_card(
+    forecast_data: dict[str, Any],
+    current_category: str = "",
+) -> None:
+    """Render the right hero column: 72-hour outlook summary and future progression.
 
     Args:
         forecast_data: Forecast result dictionary matching API contract.
+        current_category: Category of current observation for progression.
     """
     f_alert = (
         forecast_data.get("forecast_alert")
@@ -373,15 +484,34 @@ def render_72h_outlook_card(forecast_data: dict[str, Any]) -> None:
     peak_aqi = f_alert.get("peak_aqi") or summary.get("peak_aqi")
     peak_cat = f_alert.get("peak_category") or summary.get("peak_category", "—")
     peak_h = f_alert.get("peak_horizon") or summary.get("peak_horizon")
-    highest_level = f_alert.get("highest_level", "none")
-    first_usg = f_alert.get("first_advisory_horizon")
     first_unhealthy = f_alert.get("first_unhealthy_horizon")
     first_very = f_alert.get("first_very_unhealthy_horizon")
     first_haz = f_alert.get("first_hazardous_horizon")
 
     peak_color = category_color(peak_cat)
-    peak_text = category_text_color(peak_cat)
+    peak_text = category_solid_text_color(peak_cat)
     peak_aqi_str = f"{peak_aqi:.0f}" if peak_aqi is not None else "—"
+    card_cls = category_card_class(peak_cat)
+
+    curr_cat = current_category or "Moderate"
+    curr_color = category_color(curr_cat)
+    curr_text = category_solid_text_color(curr_cat)
+
+    # Future-risk progression indicator
+    peak_h_tag = f"+{peak_h}h" if peak_h is not None else "72h"
+    progression_html = f"""
+<div class="prl-progression-container">
+  <div class="prl-progression-step">
+    <span class="prl-progression-tag">Now</span>
+    <span class="prl-category-pill" style="background:{curr_color};color:{curr_text};font-size:0.75rem;padding:2px 8px;">{curr_cat}</span>
+  </div>
+  <span class="prl-progression-arrow">──→</span>
+  <div class="prl-progression-step" style="text-align:right;">
+    <span class="prl-progression-tag">Peak ({peak_h_tag})</span>
+    <span class="prl-category-pill" style="background:{peak_color};color:{peak_text};font-size:0.75rem;padding:2px 8px;">{peak_cat}</span>
+  </div>
+</div>
+"""
 
     # Build outlook rows
     rows_html = ""
@@ -399,9 +529,9 @@ def render_72h_outlook_card(forecast_data: dict[str, Any]) -> None:
     if first_unhealthy:
         rows_html += _row("First Unhealthy Hour", f'<span class="prl-horizon-tag">{format_horizon_label(first_unhealthy)}</span>')
     if first_very:
-        rows_html += _row("First Very Unhealthy Hour", f'<span class="prl-horizon-tag" style="background:#EDE9FE;color:#5B21B6;">{format_horizon_label(first_very)}</span>')
+        rows_html += _row("First Very Unhealthy Hour", f'<span class="prl-horizon-tag" style="background:#FAF5FF;color:#6D28D9;border:1px solid #E9D5FF;">{format_horizon_label(first_very)}</span>')
     if first_haz:
-        rows_html += _row("First Hazardous Hour", f'<span class="prl-horizon-tag" style="background:#FEE2E2;color:#991B1B;">{format_horizon_label(first_haz)}</span>')
+        rows_html += _row("First Hazardous Hour", f'<span class="prl-horizon-tag" style="background:#FFF1F2;color:#9F1239;border:1px solid #FFE4E6;">{format_horizon_label(first_haz)}</span>')
     if not first_unhealthy and not first_very and not first_haz:
         rows_html += _row(
             "72h Status",
@@ -413,12 +543,13 @@ def render_72h_outlook_card(forecast_data: dict[str, Any]) -> None:
 
     st.markdown(
         f"""
-<div class="prl-card">
+<div class="{card_cls}">
   <div class="prl-card-title">72-Hour Outlook</div>
-  <div style="margin-bottom:4px;">
+  <div style="margin-bottom:2px;">
     <span style="font-size:0.75rem;color:#6B7280;">Peak AQI</span>
   </div>
   <div class="prl-outlook-peak">{peak_aqi_str}</div>
+  {progression_html}
   {rows_html}
 </div>
 """,
@@ -822,3 +953,80 @@ def render_explainability_section(explanation: dict[str, Any]) -> None:
         if global_feats:
             df_global = pd.DataFrame(global_feats)
             st.dataframe(df_global, use_container_width=True, hide_index=True)
+
+
+# ── Compact AQI Legend ────────────────────────────────────────────────────────
+
+def render_aqi_legend() -> None:
+    """Render compact horizontal 6-category AQI scale legend."""
+    st.markdown(
+        """
+<div class="prl-aqi-legend">
+  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#22C55E;"></span><b>0–50</b> Good</div>
+  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#EAB308;"></span><b>51–100</b> Moderate</div>
+  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#F97316;"></span><b>101–150</b> Sensitive</div>
+  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#EF4444;"></span><b>151–200</b> Unhealthy</div>
+  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#8B5CF6;"></span><b>201–300</b> Very Unhealthy</div>
+  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#7F1D1D;"></span><b>301+</b> Hazardous</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# ── "Why this forecast?" Human-readable SHAP summary card ────────────────────
+
+def render_forecast_narrative_card(
+    explain_data: dict[str, Any],
+    horizon: int = 24,
+) -> None:
+    """Render the human-readable 'Why this forecast?' SHAP summary card.
+
+    Translates top model attributions into plain English directional statements
+    without claiming direct physical causality.
+
+    Args:
+        explain_data: Explanation dictionary from /api/explain or predictor.
+        horizon: Horizon number being explained.
+    """
+    if not explain_data:
+        return
+
+    top_features = explain_data.get("top_features", [])
+    if not top_features:
+        return
+
+    narratives = format_shap_narrative(top_features[:4], default_horizon=horizon)
+    if not narratives:
+        return
+
+    items_html = ""
+    for n in narratives:
+        arrow_color = "#EF4444" if n["is_upward"] else "#22C55E"
+        items_html += f"""
+<div class="prl-shap-item">
+  <div class="prl-shap-statement">
+    <span style="color:{arrow_color};font-weight:700;margin-right:4px;">{n["arrow"]}</span>
+    <b>{n["human_name"]}</b> contributed {n["direction"]} pressure 
+    <span style="color:#6B7280;">({'+' if n['is_upward'] else ''}{n['shap_value']:.1f} AQI)</span>
+  </div>
+  <span class="prl-shap-badge {n['badge_class']}">{n['strength']}</span>
+</div>
+"""
+
+    st.markdown(
+        f"""
+<div class="prl-narrative-card">
+  <div class="prl-narrative-header">
+    <div class="prl-narrative-title">🔍 Why this forecast? (+{horizon}h Key Drivers)</div>
+    <span style="font-size:0.75rem;color:#6B7280;">Attribution relative to model reference</span>
+  </div>
+  {items_html}
+  <div class="prl-narrative-disclaimer">
+    *Attributions indicate statistical feature influence within the EXP-019 hybrid model, not direct physical causality.
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+

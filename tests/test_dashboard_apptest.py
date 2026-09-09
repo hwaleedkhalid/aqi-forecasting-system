@@ -349,6 +349,28 @@ class TestAppTestFullRun:
         assert ">nan<" not in all_md
         assert "= None" not in all_md
 
+    def test_aqi_legend_present(self):
+        """AQI scale legend with 6 categories is present."""
+        at = _make_at()
+        assert len(at.exception) == 0
+        all_md = " ".join(e.value for e in at.markdown)
+        assert "prl-aqi-legend" in all_md or ("0–50" in all_md and "301+" in all_md)
+
+    def test_progression_indicator_present(self):
+        """Future-risk progression indicator is present in outlook card."""
+        at = _make_at()
+        assert len(at.exception) == 0
+        all_md = " ".join(e.value for e in at.markdown)
+        assert "prl-progression-container" in all_md or "Now" in all_md
+
+    def test_observed_factors_present(self):
+        """'What is affecting air quality now?' atmospheric factors panel is present."""
+        at = _make_at()
+        assert len(at.exception) == 0
+        all_md = " ".join(e.value for e in at.markdown)
+        assert "What is affecting air quality now?" in all_md or "Primary factor" in all_md
+
+
     def test_no_raw_iso_timestamp_in_main_view(self):
         """Generated-at ISO timestamp is NOT in the primary (non-expander) view.
         

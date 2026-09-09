@@ -377,11 +377,78 @@ class TestUIHelpers:
         cls = source_badge_class("hopsworks", False, False)
         assert cls == "prl-source-badge"
 
+    def test_category_color_lookups(self):
+        from src.dashboard.ui_helpers import (
+            category_bg_color,
+            category_border_color,
+            category_card_class,
+            category_color,
+            category_solid_text_color,
+        )
+        assert category_color("Good") == "#22C55E"
+        assert category_bg_color("Good") == "#F0FDF4"
+        assert category_border_color("Good") == "#BBF7D0"
+        assert category_solid_text_color("Good") == "#FFFFFF"
+        assert "prl-card-good" in category_card_class("Good")
 
-# ── Chart tests ───────────────────────────────────────────────────────────────
+        assert category_color("Hazardous") == "#7F1D1D"
+        assert category_bg_color("Hazardous") == "#FFF1F2"
+        assert category_border_color("Hazardous") == "#FFE4E6"
+        assert "prl-card-hazardous" in category_card_class("Hazardous")
+
+    def test_humanize_feature_name(self):
+        from src.dashboard.ui_helpers import humanize_feature_name
+        assert "PM10" in humanize_feature_name("pm10_lag_1h")
+        assert "PM2.5" in humanize_feature_name("pm2_5_lag_1h")
+        assert "AQI" in humanize_feature_name("epa_aqi_rolling_mean_6h")
+        assert "temperature" in humanize_feature_name("temperature_2m_lag_1h").lower()
+        assert humanize_feature_name("") == "Unknown Factor"
+
+    def test_format_shap_narrative(self):
+        from src.dashboard.ui_helpers import format_shap_narrative
+        sample_top = [
+            {"feature": "pm10_lag_1h", "shap_value": 18.5, "raw_value": 90.0},
+            {"feature": "temperature_2m_lag_1h", "shap_value": -6.2, "raw_value": 24.0},
+            {"feature": "hour_of_day_sin", "shap_value": 1.2, "raw_value": 0.5},
+        ]
+        narratives = format_shap_narrative(sample_top, default_horizon=24)
+        assert len(narratives) == 3
+
+        # Strong upward
+        assert narratives[0]["is_upward"] is True
+        assert narratives[0]["strength"] == "Strong"
+        assert "↑" in narratives[0]["arrow"]
+        assert "upward" in narratives[0]["direction"]
+
+        # Moderate downward
+        assert narratives[1]["is_upward"] is False
+        assert narratives[1]["strength"] == "Moderate"
+        assert "↓" in narratives[1]["arrow"]
+        assert "downward" in narratives[1]["direction"]
+
+        # Minor upward
+        assert narratives[2]["strength"] == "Minor"
+
+
+# ── Chart and Gauge tests ─────────────────────────────────────────────────────
 
 class TestForecastChart:
     """Verify forecast chart structure and EPA reference lines."""
+
+    def test_build_aqi_gauge_figure(self):
+        from src.dashboard.components import build_aqi_gauge_figure
+        fig = build_aqi_gauge_figure(120.0, "Unhealthy for Sensitive Groups")
+        assert fig is not None
+        assert fig.data[0].type == "indicator"
+        assert fig.data[0].value == 120.0
+        assert fig.data[0].gauge.axis.range == (0, 500)
+        assert len(fig.data[0].gauge.steps) == 6
+
+    def test_build_aqi_gauge_figure_none_safe(self):
+        from src.dashboard.components import build_aqi_gauge_figure
+        fig = build_aqi_gauge_figure(None, "Unknown")
+        assert fig is not None
+        assert fig.data[0].value == 0.0
 
     def test_build_forecast_figure_structure(self, predictor):
         forecast_data = predictor.predict_latest(use_cache=True)
@@ -393,6 +460,9 @@ class TestForecastChart:
         assert "Predicted AQI (EXP-019)" in fig.data[2].name
         assert len(fig.data[2].x) == 72
         assert len(fig.data[2].y) == 72
+        # Check background zones
+        hrects = [s for s in fig.layout.shapes if s.type == "rect"]
+        assert len(hrects) >= 6
 
     def test_chart_has_151_201_301_reference_lines(self):
         dummy_forecasts = [
@@ -411,6 +481,7 @@ class TestForecastChart:
         assert 151 in y_lines, "Expected reference line at y=151 (Unhealthy)"
         assert 201 in y_lines, "Expected reference line at y=201 (Very Unhealthy)"
         assert 301 in y_lines, "Expected reference line at y=301 (Hazardous)"
+
 
 
 # ── Component render tests (focused unit) ─────────────────────────────────────
@@ -584,8 +655,39 @@ class TestComponentRendering:
             mock_warn.assert_called_once()
             assert "145.0 hours" in mock_warn.call_args[0][0]
 
+    def test_render_aqi_legend(self):
+        from src.dashboard.components import render_aqi_legend
+        with patch("streamlit.markdown") as mock_md:
+            render_aqi_legend()
+            mock_md.assert_called_once()
+            html = mock_md.call_args[0][0]
+            assert "0–50" in html
+            assert "51–100" in html
+            assert "101–150" in html
+            assert "151–200" in html
+            assert "201–300" in html
+            assert "301+" in html
+
+    def test_render_forecast_narrative_card(self):
+        from src.dashboard.components import render_forecast_narrative_card
+        explain_data = {
+            "horizon": 24,
+            "top_features": [
+                {"feature": "pm10_lag_1h", "shap_value": 16.4, "raw_value": 85.0},
+                {"feature": "temperature_2m_lag_1h", "shap_value": -5.1, "raw_value": 22.0},
+            ],
+        }
+        with patch("streamlit.markdown") as mock_md:
+            render_forecast_narrative_card(explain_data, horizon=24)
+            mock_md.assert_called_once()
+            html = mock_md.call_args[0][0]
+            assert "Why this forecast?" in html
+            assert "PM10" in html
+            assert "Strong" in html
+
 
 # ── main() end-to-end tests ───────────────────────────────────────────────────
+
 
 class TestAppMain:
     """End-to-end tests for app.main() with mocked dependencies."""
