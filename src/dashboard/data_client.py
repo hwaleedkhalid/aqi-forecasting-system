@@ -15,6 +15,7 @@ from src.logger import logger
 
 DEFAULT_API_URL = os.environ.get("FLASK_API_URL", "http://127.0.0.1:5000/api")
 ENABLE_LOCAL_FALLBACK = os.environ.get("ENABLE_LOCAL_FALLBACK", "false").lower() == "true"
+DEFAULT_TIMEOUT = float(os.environ.get("API_TIMEOUT_SECONDS", "10.0"))
 
 
 class DashboardDataClient:
@@ -23,7 +24,7 @@ class DashboardDataClient:
     def __init__(
         self,
         api_base_url: str = DEFAULT_API_URL,
-        timeout: float = 2.0,
+        timeout: float = DEFAULT_TIMEOUT,
         predictor: Any | None = None,
         enable_local_fallback: bool | None = None,
     ) -> None:
