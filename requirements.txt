@@ -17,6 +17,10 @@ gunicorn>=21.2.0
 # Utilities
 python-dotenv>=1.0.0
 
+# Dashboard & Visualization (Streamlit Community Cloud)
+streamlit>=1.28.0
+plotly>=5.18.0
+
 # Cloud Feature Store (Online Read Runtime)
 hopsworks==5.0.6
 pyarrow>=12.0.0
