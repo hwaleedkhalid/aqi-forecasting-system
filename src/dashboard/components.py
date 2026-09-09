@@ -147,7 +147,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
     fig.update_layout(
         paper_bgcolor="#FFFFFF",
         plot_bgcolor="#FAFAFA",
-        title=None,
+        title=dict(text="", font=dict(size=1)),
         xaxis=dict(
             title="Forecast Target Time (UTC)",
             showgrid=True,
@@ -165,6 +165,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
             title_font=dict(size=11, color="#6B7280"),
         ),
         legend=dict(
+            title=dict(text=""),
             orientation="h",
             yanchor="bottom",
             y=1.01,

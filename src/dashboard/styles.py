@@ -227,24 +227,28 @@ html, body, [class*="css"] {
 /* ── Pollutant / Weather compact grid ────────────────────────── */
 .prl-metric-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 8px;
     margin-top: 6px;
 }
 .prl-metric-pill {
     background: #F9FAFB;
     border: 1px solid #E5E7EB;
     border-radius: 10px;
-    padding: 10px 8px;
+    padding: 10px 6px;
     text-align: center;
+    min-width: 0;
 }
 .prl-metric-label {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 600;
     color: #6B7280;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .prl-metric-value {
     font-size: 1.05rem;
