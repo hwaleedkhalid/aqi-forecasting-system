@@ -20,33 +20,56 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Ensure project root is on sys.path
+# Ensure project root and dashboard directory are on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+DASHBOARD_DIR = Path(__file__).resolve().parent
+if str(DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(DASHBOARD_DIR))
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.dashboard.ui_helpers import (
-    category_bg_color,
-    category_border_color,
-    category_card_class,
-    category_color,
-    category_icon,
-    category_solid_text_color,
-    category_text_color,
-    format_horizon_label,
-    format_relative_age,
-    format_shap_narrative,
-    format_stale_age,
-    format_timestamp,
-    humanize_feature_name,
-    safe_val,
-    source_badge_class,
-    source_display_name,
-)
+try:
+    from src.dashboard.ui_helpers import (
+        category_bg_color,
+        category_border_color,
+        category_card_class,
+        category_color,
+        category_icon,
+        category_solid_text_color,
+        category_text_color,
+        format_horizon_label,
+        format_relative_age,
+        format_shap_narrative,
+        format_stale_age,
+        format_timestamp,
+        humanize_feature_name,
+        safe_val,
+        source_badge_class,
+        source_display_name,
+    )
+except ImportError:
+    from ui_helpers import (  # type: ignore[no-redef]
+        category_bg_color,
+        category_border_color,
+        category_card_class,
+        category_color,
+        category_icon,
+        category_solid_text_color,
+        category_text_color,
+        format_horizon_label,
+        format_relative_age,
+        format_shap_narrative,
+        format_stale_age,
+        format_timestamp,
+        humanize_feature_name,
+        safe_val,
+        source_badge_class,
+        source_display_name,
+    )
 
 
 # ── Speedometer / AQI Gauge ──────────────────────────────────────────────────

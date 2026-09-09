@@ -39,12 +39,15 @@ def setup_logger(name: str = "pearls_aqi") -> logging.Logger:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # File handler (data/logs/)
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(LOGS_DIR / LOG_FILE, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    # File handler (data/logs/) - guarded for cloud container environments
+    try:
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(LOGS_DIR / LOG_FILE, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception:
+        pass
 
     return logger
 

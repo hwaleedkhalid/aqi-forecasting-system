@@ -8,10 +8,25 @@ is offline or unreachable.
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from typing import Any
 import requests
 
-from src.logger import logger
+# Ensure project root and dashboard directory are on sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+DASHBOARD_DIR = Path(__file__).resolve().parent
+if str(DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(DASHBOARD_DIR))
+
+try:
+    from src.logger import logger
+except Exception:
+    import logging
+
+    logger = logging.getLogger("pearls_aqi")
 
 DEFAULT_API_URL = os.environ.get("FLASK_API_URL", "http://127.0.0.1:5000/api")
 ENABLE_LOCAL_FALLBACK = os.environ.get("ENABLE_LOCAL_FALLBACK", "false").lower() == "true"

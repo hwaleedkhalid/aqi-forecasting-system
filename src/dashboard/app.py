@@ -22,40 +22,77 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root is on sys.path
+# Ensure project root and dashboard directory are on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+DASHBOARD_DIR = Path(__file__).resolve().parent
+if str(DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(DASHBOARD_DIR))
 
 import streamlit as st
 
-from src.dashboard.components import (
-    build_aqi_gauge_figure,
-    build_forecast_figure,
-    render_alert_banners,
-    render_aqi_legend,
-    render_cold_start_error,
-    render_current_observation_card,
-    render_explainability_section,
-    render_forecast_narrative_card,
-    render_health_guidance,
-    render_metadata_header,
-    render_model_system_details,
-    render_sidebar,
-    render_telemetry_breakdown,
-    render_72h_outlook_card,
-)
-from src.dashboard.data_client import DashboardDataClient
-from src.dashboard.styles import DASHBOARD_CSS
-from src.dashboard.ui_helpers import (
-    category_bg_color,
-    category_border_color,
-    category_color,
-    category_text_color,
-    format_relative_age,
-    safe_val,
-)
-from src.logger import logger
+try:
+    from src.dashboard.components import (
+        build_aqi_gauge_figure,
+        build_forecast_figure,
+        render_alert_banners,
+        render_aqi_legend,
+        render_cold_start_error,
+        render_current_observation_card,
+        render_explainability_section,
+        render_forecast_narrative_card,
+        render_health_guidance,
+        render_metadata_header,
+        render_model_system_details,
+        render_sidebar,
+        render_telemetry_breakdown,
+        render_72h_outlook_card,
+    )
+    from src.dashboard.data_client import DashboardDataClient
+    from src.dashboard.styles import DASHBOARD_CSS
+    from src.dashboard.ui_helpers import (
+        category_bg_color,
+        category_border_color,
+        category_color,
+        category_text_color,
+        format_relative_age,
+        safe_val,
+    )
+except ImportError:
+    from components import (  # type: ignore[no-redef]
+        build_aqi_gauge_figure,
+        build_forecast_figure,
+        render_alert_banners,
+        render_aqi_legend,
+        render_cold_start_error,
+        render_current_observation_card,
+        render_explainability_section,
+        render_forecast_narrative_card,
+        render_health_guidance,
+        render_metadata_header,
+        render_model_system_details,
+        render_sidebar,
+        render_telemetry_breakdown,
+        render_72h_outlook_card,
+    )
+    from data_client import DashboardDataClient  # type: ignore[no-redef]
+    from styles import DASHBOARD_CSS  # type: ignore[no-redef]
+    from ui_helpers import (  # type: ignore[no-redef]
+        category_bg_color,
+        category_border_color,
+        category_color,
+        category_text_color,
+        format_relative_age,
+        safe_val,
+    )
+
+try:
+    from src.logger import logger
+except Exception:
+    import logging
+
+    logger = logging.getLogger("pearls_aqi")
 
 
 def init_page_config() -> None:
