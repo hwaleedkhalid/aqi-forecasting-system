@@ -59,12 +59,17 @@ def init_page_config() -> None:
     st.markdown(DASHBOARD_CSS, unsafe_allow_html=True)
 
 
-def render_app_header(age_hours: float | None = None, force_refresh: bool = False) -> bool:
+def render_app_header(
+    age_hours: float | None = None,
+    force_refresh: bool = False,
+    key: str = "refresh_btn",
+) -> bool:
     """Render the application header with logo, subtitle, location, and refresh button.
 
     Args:
         age_hours: Age of the current observation in hours (for relative time display).
         force_refresh: Current state of the refresh button (unused; for signature parity).
+        key: Unique Streamlit widget key for the refresh button.
 
     Returns:
         True if the Refresh button was clicked this run, False otherwise.
@@ -92,6 +97,7 @@ def render_app_header(age_hours: float | None = None, force_refresh: bool = Fals
     with col_right:
         clicked = st.button(
             "Refresh",
+            key=key,
             help="Bypass cache and force recomputation of the 72-hour forecast",
             use_container_width=True,
         )
@@ -148,8 +154,7 @@ def main() -> None:
     """Main Streamlit execution entry point."""
     init_page_config()
 
-    # ── Initial header (no freshness until data loaded) ────────────────────
-    force_refresh = render_app_header()
+    force_refresh = bool(st.session_state.get("refresh_btn", False))
 
     client = DashboardDataClient()
 
@@ -161,20 +166,22 @@ def main() -> None:
             model_info, _ = client.fetch_model_info()
     except ConnectionError as e:
         logger.warning(f"Dashboard API connection error: {e}")
+        render_app_header(age_hours=None)
         render_cold_start_error(e)
         return
     except Exception as e:
         logger.error(f"Dashboard data retrieval failed: {e}", exc_info=True)
+        render_app_header(age_hours=None)
         st.error("**Failed to load air quality data.** Please try again shortly.")
         with st.expander("Technical details"):
             st.code(str(e))
         return
 
-    # ── 1. Hero: two-column Current AQI + 72h Outlook ─────────────────────
+    # ── Header ────────────────────────────────────────────────────────────
     age_hours = obs_data.get("input_age_hours")
-    # Re-render header with freshness now that data is available
     render_app_header(age_hours=age_hours)
 
+    # ── 1. Hero: two-column Current AQI + 72h Outlook ─────────────────────
     hero_left, hero_right = st.columns(2, gap="medium")
     with hero_left:
         render_current_observation_card(obs_data)
