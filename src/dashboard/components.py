@@ -1,20 +1,48 @@
 """Pearls AQI Predictor - Dashboard UI Components.
 
-Reusable rendering components and Plotly chart builders for the Streamlit dashboard,
-strictly adhering to domain threshold semantics, transparent data freshness notices,
-and empirical error interval visualizations.
+Reusable rendering components and Plotly chart builders for the modern Streamlit
+dashboard.  All public function signatures are preserved for test compatibility.
+The information architecture has been completely redesigned:
+
+  Hero (Current AQI | 72h Outlook)
+  → Compact alert/status
+  → Chart
+  → Milestones
+  → Pollutants + Weather
+  → Health Guidance
+  → Advanced Insights (SHAP)
+  → Model & System Details
 """
 
 from __future__ import annotations
 
 from typing import Any
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.dashboard.ui_helpers import (
+    category_color,
+    category_icon,
+    category_text_color,
+    format_horizon_label,
+    format_relative_age,
+    format_stale_age,
+    format_timestamp,
+    safe_val,
+    source_badge_class,
+    source_display_name,
+)
+
+
+# ── Forecast chart ────────────────────────────────────────────────────────────
 
 def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
-    """Build interactive Plotly figure displaying 72-hour forecast with empirical error intervals.
+    """Build interactive Plotly figure for the 72-hour AQI forecast.
+
+    Preserves all scientific content: point values, empirical error band,
+    151 / 201 / 301 EPA threshold reference lines, UTC timestamps.
 
     Args:
         forecasts: List of 72 forecast horizon dictionaries matching contract.
@@ -33,8 +61,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
 
     fig = go.Figure()
 
-    # 1. Shaded Empirical Prediction Error Interval Band
-    # Upper bound (invisible line)
+    # 1. Shaded empirical prediction error interval band
     fig.add_trace(
         go.Scatter(
             x=times,
@@ -45,7 +72,6 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
             hoverinfo="skip",
         )
     )
-    # Lower bound with fill to upper bound
     fig.add_trace(
         go.Scatter(
             x=times,
@@ -53,98 +79,107 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
             mode="lines",
             line=dict(width=0),
             fill="tonexty",
-            fillcolor="rgba(33, 150, 243, 0.18)",
+            fillcolor="rgba(30, 58, 95, 0.12)",
             name="Empirical Error Range (Walk-forward 10th–90th out-of-fold residuals)",
             hoverinfo="skip",
         )
     )
 
-    # 2. Predicted AQI Main Curve
+    # 2. Predicted AQI main curve
     fig.add_trace(
         go.Scatter(
             x=times,
             y=aqis,
             mode="lines+markers",
             name="Predicted AQI (EXP-019)",
-            line=dict(color="#1976D2", width=3),
-            marker=dict(size=4, color="#0D47A1"),
+            line=dict(color="#1E3A5F", width=2.5),
+            marker=dict(size=3.5, color="#1E3A5F"),
             customdata=custom_data,
             hovertemplate=(
                 "<b>Horizon:</b> +%{customdata[0]}h<br>"
                 "<b>Forecast Time:</b> %{x}<br>"
                 "<b>Predicted AQI:</b> %{y:.1f}<br>"
                 "<b>Category:</b> %{customdata[1]}<br>"
-                "<b>Empirical Error Interval:</b> [%{customdata[2]:.1f}, %{customdata[3]:.1f}]<extra></extra>"
+                "<b>Empirical Error Range:</b> [%{customdata[2]:.1f}, %{customdata[3]:.1f}]"
+                "<extra></extra>"
             ),
         )
     )
 
-    # 3. Horizontal Reference Lines for EPA Category Boundaries
+    # 3. EPA category boundary reference lines (151 / 201 / 301 — required)
     fig.add_hline(
         y=151,
         line_dash="dash",
         line_color="#FF0000",
-        line_width=1.5,
+        line_width=1.2,
         annotation_text="Unhealthy (151)",
         annotation_position="top left",
-        annotation_font=dict(color="#FF0000", size=10),
+        annotation_font=dict(color="#FF0000", size=9),
     )
     fig.add_hline(
         y=201,
         line_dash="dash",
         line_color="#8F3F97",
-        line_width=1.5,
+        line_width=1.2,
         annotation_text="Very Unhealthy (201)",
         annotation_position="top left",
-        annotation_font=dict(color="#8F3F97", size=10),
+        annotation_font=dict(color="#8F3F97", size=9),
     )
     fig.add_hline(
         y=301,
         line_dash="dash",
         line_color="#7E0023",
-        line_width=1.5,
+        line_width=1.2,
         annotation_text="Hazardous (301)",
         annotation_position="top left",
-        annotation_font=dict(color="#7E0023", size=10),
+        annotation_font=dict(color="#7E0023", size=9),
     )
 
-    # 4. Layout formatting
+    # 4. Layout
     max_val = max(max(uppers), max(aqis), 350.0)
     fig.update_layout(
-        title=dict(
-            text="<b>72-Hour AQI Multi-Horizon Trajectory</b><br><sup>Empirical prediction error intervals derived from out-of-fold residuals (not parametric model confidence)</sup>",
-            x=0.01,
-            y=0.96,
-        ),
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FAFAFA",
+        title=None,
         xaxis=dict(
             title="Forecast Target Time (UTC)",
             showgrid=True,
-            gridcolor="rgba(0,0,0,0.06)",
+            gridcolor="rgba(0,0,0,0.05)",
+            tickfont=dict(size=10, color="#6B7280"),
+            title_font=dict(size=11, color="#6B7280"),
         ),
         yaxis=dict(
             title="Air Quality Index (AQI)",
             rangemode="nonnegative",
             range=[0, max_val + 20],
             showgrid=True,
-            gridcolor="rgba(0,0,0,0.06)",
+            gridcolor="rgba(0,0,0,0.05)",
+            tickfont=dict(size=10, color="#6B7280"),
+            title_font=dict(size=11, color="#6B7280"),
         ),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.02,
+            y=1.01,
             xanchor="right",
             x=1.0,
+            font=dict(size=10, color="#6B7280"),
         ),
-        margin=dict(l=40, r=30, t=80, b=40),
+        margin=dict(l=50, r=30, t=30, b=50),
         hovermode="x unified",
-        height=480,
+        height=420,
     )
 
     return fig
 
 
+# ── Freshness / Alert banners ─────────────────────────────────────────────────
+
 def render_freshness_banner(is_stale: bool, observed_at: str, age_hours: float) -> None:
-    """Render explicit warning banner when input telemetry is historical."""
+    """Render explicit warning banner when input telemetry is historical.
+
+    Preserved for backward compatibility; called internally by render_alert_banners.
+    """
     if is_stale:
         st.warning(
             f"⚠️ **Telemetry Notice**: Latest available observation is historical "
@@ -154,20 +189,23 @@ def render_freshness_banner(is_stale: bool, observed_at: str, age_hours: float) 
 
 
 def render_alert_banners(obs_data: dict[str, Any], forecast_data: dict[str, Any]) -> None:
-    """Render prioritized, uncertainty-aware alert banners for observations, forecasts, and freshness.
+    """Render a compact, unified alert area.
 
-    Priority hierarchy:
-    1. Current Severe / Hazardous observation
-    2. Forecast Severe / Hazardous trajectory (within 72 hours)
-    3. Stale telemetry notice (if input observation > 3h old)
-    4. Current or Forecast Unhealthy warning / Advisory (if no higher tier active)
-    5. Upper empirical residual error interval crossing Hazardous threshold (if forecast < 201)
+    Priority hierarchy (semantics preserved from alerting.py):
+    1. Current Severe / Hazardous → st.error
+    2. Forecast Severe / Hazardous → st.error
+    3. Current or Forecast Unhealthy warning → st.warning (only if no severe above)
+    4. Current or Forecast Advisory → st.info (only if no warning above)
+    5. Stale notice → compact st.caption line
+    6. Uncertainty tail-risk → st.expander (collapsed by default)
+
+    Only ONE primary banner renders. Stale and uncertainty are subordinate.
 
     Args:
         obs_data: Latest observation dictionary matching API contract.
         forecast_data: Forecast result dictionary matching API contract.
     """
-    # 1. Extract observation alert metadata
+    # --- Extract observation alert ---
     obs_alert = obs_data.get("alert")
     if not obs_alert:
         curr_aqi = obs_data.get("current_aqi", 0.0)
@@ -184,61 +222,203 @@ def render_alert_banners(obs_data: dict[str, Any], forecast_data: dict[str, Any]
     obs_cat = obs_alert.get("category", obs_data.get("category", "Unknown"))
     obs_msg = obs_alert.get("message", "")
 
-    # 2. Extract forecast alert metadata
-    f_alert = forecast_data.get("forecast_alert") or forecast_data.get("summary", {}).get("forecast_alert") or {}
+    # --- Extract forecast alert ---
+    f_alert = (
+        forecast_data.get("forecast_alert")
+        or forecast_data.get("summary", {}).get("forecast_alert")
+        or {}
+    )
     f_level = f_alert.get("highest_level", "none")
+    f_peak = f_alert.get("peak_aqi")
+    f_peak_h = f_alert.get("peak_horizon")
     f_msg = f_alert.get("message", "")
 
-    # Priority 1: Current Severe / Hazardous observation
-    if obs_level == "hazardous":
-        st.error(
-            f"🚨 **HAZARDOUS AIR QUALITY EMERGENCY**: Current observed air quality in Lahore is "
-            f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
-        )
-    elif obs_level == "severe":
-        st.error(
-            f"⚠️ **VERY UNHEALTHY AIR QUALITY ALERT**: Current observed air quality in Lahore is "
-            f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
-        )
+    # --- Determine highest overall severity ---
+    _rank = {"none": 0, "advisory": 1, "warning": 2, "severe": 3, "hazardous": 4}
+    obs_rank = _rank.get(obs_level, 0)
+    f_rank = _rank.get(f_level, 0)
+    highest_rank = max(obs_rank, f_rank)
 
-    # Priority 2: Forecast Severe / Hazardous trajectory
-    if f_level == "hazardous":
-        st.error(f"🚨 **HAZARDOUS AQI FORECAST**: {f_msg}")
-    elif f_level == "severe":
-        st.error(f"⚠️ **VERY UNHEALTHY AQI FORECAST**: {f_msg}")
+    # --- Render single primary banner ---
+    if highest_rank >= 4:  # hazardous
+        if obs_rank >= 4:
+            st.error(
+                f"🚨 **Hazardous Air Quality Emergency** — Current AQI **{obs_aqi:.0f}** "
+                f"({obs_cat}). {obs_msg}"
+            )
+        else:
+            peak_str = f" · Peak AQI {f_peak:.0f} at {format_horizon_label(f_peak_h)}" if f_peak else ""
+            st.error(f"🚨 **Hazardous AQI Forecast**{peak_str} — {f_msg}")
 
-    # Priority 3: Stale Data Notice (displayed alongside severe alerts if data is historical)
+    elif highest_rank == 3:  # severe (very unhealthy)
+        if obs_rank >= 3:
+            st.error(
+                f"⚠️ **Very Unhealthy Air Quality** — Current AQI **{obs_aqi:.0f}** "
+                f"({obs_cat}). {obs_msg}"
+            )
+        else:
+            peak_str = f" · Peak AQI {f_peak:.0f} at {format_horizon_label(f_peak_h)}" if f_peak else ""
+            st.error(f"⚠️ **Very Unhealthy AQI Forecast**{peak_str} — {f_msg}")
+
+    elif highest_rank == 2:  # warning (unhealthy)
+        if obs_rank >= 2:
+            st.warning(
+                f"⚠️ **Unhealthy Air Quality** — Current AQI **{obs_aqi:.0f}** "
+                f"({obs_cat}). {obs_msg}"
+            )
+        else:
+            peak_str = f" · Peak {f_peak:.0f} AQI at {format_horizon_label(f_peak_h)}" if f_peak else ""
+            st.warning(f"⚠️ **Unhealthy AQI Forecast**{peak_str} — {f_msg}")
+
+    elif highest_rank == 1:  # advisory
+        if obs_rank >= 1:
+            st.info(
+                f"ℹ️ **Air Quality Advisory** — Current AQI **{obs_aqi:.0f}** "
+                f"({obs_cat}). {obs_msg}"
+            )
+        else:
+            st.info(f"ℹ️ **Air Quality Advisory Forecast** — {f_msg}")
+
+    # --- Stale compact notice (always below primary banner if present) ---
     is_stale = forecast_data.get("is_stale", obs_data.get("is_stale", False))
-    observed_at = forecast_data.get("input_observed_at", obs_data.get("input_observed_at", "Unknown"))
     age_hours = forecast_data.get("input_age_hours", obs_data.get("input_age_hours", 0.0))
     if is_stale:
-        render_freshness_banner(is_stale=True, observed_at=observed_at, age_hours=age_hours)
-
-    # Priority 4: Warnings & Advisories (only if no severe/hazardous banners were shown for that tier)
-    if obs_level not in ("hazardous", "severe") and f_level not in ("hazardous", "severe"):
-        if obs_level == "warning":
-            st.warning(
-                f"⚠️ **UNHEALTHY AIR QUALITY WARNING**: Current observed air quality is "
-                f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
-            )
-        elif f_level == "warning":
-            st.warning(f"⚠️ **UNHEALTHY AQI FORECAST**: {f_msg}")
-        elif obs_level == "advisory":
-            st.info(
-                f"ℹ️ **AIR QUALITY ADVISORY**: Current observed air quality is "
-                f"**{obs_aqi:.0f} AQI** ({obs_cat}). {obs_msg}"
-            )
-        elif f_level == "advisory":
-            st.info(f"ℹ️ **AIR QUALITY ADVISORY FORECAST**: {f_msg}")
-
-    # Priority 5: Upper residual error interval crosses hazardous while point forecast does not
-    if f_alert.get("upper_interval_crosses_hazardous") and f_level not in ("hazardous", "severe"):
-        st.info(
-            "ℹ️ **Uncertainty Notice**: The 90th percentile empirical error interval crosses the Hazardous "
-            "threshold (>300 AQI) at one or more horizons, indicating extreme air pollution tail risk. "
-            "Monitor ongoing hourly telemetry updates."
+        observed_at = forecast_data.get(
+            "input_observed_at", obs_data.get("input_observed_at", "Unknown")
+        )
+        st.caption(
+            f"🕒 Historical observation · {age_hours:.1f}h old "
+            f"(Observed: {format_timestamp(observed_at)}). "
+            "Forecasts anchored to this observation, not current time."
         )
 
+    # --- Uncertainty tail-risk (collapsed expander) ---
+    if f_alert.get("upper_interval_crosses_hazardous") and highest_rank < 4:
+        with st.expander("⚠️ Forecast uncertainty notice", expanded=False):
+            st.info(
+                "The 90th-percentile empirical error interval exceeds the Hazardous "
+                "threshold (>300 AQI) at one or more forecast horizons, indicating elevated "
+                "extreme pollution tail risk. Monitor ongoing hourly updates."
+            )
+
+
+# ── Current observation card (LEFT hero column) ───────────────────────────────
+
+def render_current_observation_card(obs: dict[str, Any]) -> None:
+    """Render the left hero column: large current AQI, category, dominant pollutant, freshness.
+
+    Args:
+        obs: Latest observation dictionary matching API contract.
+    """
+    aqi_val = obs.get("current_aqi", 0.0)
+    category = obs.get("category", "Unknown")
+    color = obs.get("color") or category_color(category)
+    text_col = category_text_color(category)
+    dominant = obs.get("dominant_pollutant", "pm2_5")
+    feature_source = obs.get("feature_source", "")
+    fallback_active = obs.get("fallback_active", False)
+    is_stale = obs.get("is_stale", False)
+    age_hours = obs.get("input_age_hours")
+
+    badge_class = source_badge_class(feature_source, fallback_active, is_stale)
+    source_name = source_display_name(feature_source, fallback_active, is_stale)
+
+    if is_stale:
+        freshness_line = format_stale_age(age_hours)
+    else:
+        freshness_line = f"Updated {format_relative_age(age_hours)}"
+
+    aqi_display = f"{aqi_val:.0f}" if aqi_val is not None else "—"
+
+    st.markdown(
+        f"""
+<div class="prl-card">
+  <div class="prl-card-title">Current Air Quality · Lahore</div>
+  <div class="prl-hero-aqi">{aqi_display}<span class="prl-hero-aqi-unit">AQI</span></div>
+  <span class="prl-category-pill" style="background:{color};color:{text_col};">{category}</span>
+  <div class="prl-hero-meta">
+    <b>Dominant pollutant:</b> {dominant.upper().replace("_", ".")}<br>
+    {freshness_line}
+  </div>
+  <span class="{badge_class}">{source_name}</span>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# ── 72h Outlook card (RIGHT hero column) ─────────────────────────────────────
+
+def render_72h_outlook_card(forecast_data: dict[str, Any]) -> None:
+    """Render the right hero column: 72-hour outlook summary.
+
+    Args:
+        forecast_data: Forecast result dictionary matching API contract.
+    """
+    f_alert = (
+        forecast_data.get("forecast_alert")
+        or forecast_data.get("summary", {}).get("forecast_alert")
+        or {}
+    )
+    summary = forecast_data.get("summary", {})
+
+    peak_aqi = f_alert.get("peak_aqi") or summary.get("peak_aqi")
+    peak_cat = f_alert.get("peak_category") or summary.get("peak_category", "—")
+    peak_h = f_alert.get("peak_horizon") or summary.get("peak_horizon")
+    highest_level = f_alert.get("highest_level", "none")
+    first_usg = f_alert.get("first_advisory_horizon")
+    first_unhealthy = f_alert.get("first_unhealthy_horizon")
+    first_very = f_alert.get("first_very_unhealthy_horizon")
+    first_haz = f_alert.get("first_hazardous_horizon")
+
+    peak_color = category_color(peak_cat)
+    peak_text = category_text_color(peak_cat)
+    peak_aqi_str = f"{peak_aqi:.0f}" if peak_aqi is not None else "—"
+
+    # Build outlook rows
+    rows_html = ""
+
+    def _row(label: str, value: str) -> str:
+        return (
+            f'<div style="margin-top:8px;">'
+            f'<div class="prl-outlook-label">{label}</div>'
+            f'<div class="prl-outlook-value">{value}</div>'
+            f"</div>"
+        )
+
+    rows_html += _row("Highest Category", f'<span class="prl-category-pill" style="background:{peak_color};color:{peak_text};font-size:0.78rem;padding:2px 10px;">{peak_cat}</span>')
+
+    if first_unhealthy:
+        rows_html += _row("First Unhealthy Hour", f'<span class="prl-horizon-tag">{format_horizon_label(first_unhealthy)}</span>')
+    if first_very:
+        rows_html += _row("First Very Unhealthy Hour", f'<span class="prl-horizon-tag" style="background:#EDE9FE;color:#5B21B6;">{format_horizon_label(first_very)}</span>')
+    if first_haz:
+        rows_html += _row("First Hazardous Hour", f'<span class="prl-horizon-tag" style="background:#FEE2E2;color:#991B1B;">{format_horizon_label(first_haz)}</span>')
+    if not first_unhealthy and not first_very and not first_haz:
+        rows_html += _row(
+            "72h Status",
+            '<span class="prl-no-outlook">✅ Good / Moderate throughout</span>',
+        )
+
+    if peak_h:
+        rows_html += _row("Peak Horizon", f'<span class="prl-horizon-tag">{format_horizon_label(peak_h)}</span>')
+
+    st.markdown(
+        f"""
+<div class="prl-card">
+  <div class="prl-card-title">72-Hour Outlook</div>
+  <div style="margin-bottom:4px;">
+    <span style="font-size:0.75rem;color:#6B7280;">Peak AQI</span>
+  </div>
+  <div class="prl-outlook-peak">{peak_aqi_str}</div>
+  {rows_html}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# ── Compact status / metadata line ────────────────────────────────────────────
 
 def render_metadata_header(
     forecast_origin: str,
@@ -246,136 +426,279 @@ def render_metadata_header(
     source_mode: str,
     latency_ms: float,
 ) -> None:
-    """Render provenance headers cleanly separating forecast origin and generation time."""
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.caption("Forecast Origin (Observation Time)")
-        st.write(f"`{forecast_origin}`")
-    with col2:
-        st.caption("Served / Generated At")
-        st.write(f"`{generated_at}`")
-    with col3:
-        st.caption("Data Source Mode")
-        badge_color = "green" if "REST API" in source_mode else "orange"
-        st.markdown(f":{badge_color}[**{source_mode}**]")
-    with col4:
-        st.caption("Inference Latency")
-        st.write(f"**{latency_ms:.1f} ms**")
+    """Render compact user-friendly status line.
 
+    Full provenance (raw timestamps, latency) is displayed in the Model & System
+    Details expander, not here.
 
-def render_current_observation_card(obs: dict[str, Any]) -> None:
-    """Render metric card for current air quality observation."""
-    aqi_val = obs.get("current_aqi", 0.0)
-    category = obs.get("category", "Unknown")
-    color = obs.get("color", "#808080")
-    dominant = obs.get("dominant_pollutant", "pm2_5")
-    advisory = obs.get("health_advisory", "")
+    Args:
+        forecast_origin: ISO timestamp of observation used as forecast anchor.
+        generated_at: ISO timestamp when forecast was generated.
+        source_mode: Data source mode string.
+        latency_ms: Inference latency in milliseconds.
+    """
+    # Derive user-friendly age from forecast_origin
+    from datetime import datetime, timezone
+
+    age_str = "—"
+    try:
+        dt = datetime.fromisoformat(forecast_origin)
+        now = datetime.now(timezone.utc)
+        age_h = (now - dt.astimezone(timezone.utc)).total_seconds() / 3600.0
+        if age_h < 0:
+            age_h = 0.0
+        age_str = format_relative_age(age_h)
+    except Exception:
+        age_str = format_timestamp(forecast_origin)
+
+    # Source label
+    if "REST API" in (source_mode or "") or source_mode == "REST API":
+        src_label = "Hopsworks"
+    elif "Direct Local" in (source_mode or ""):
+        src_label = "Local inference"
+    else:
+        src_label = source_mode or "Unknown"
 
     st.markdown(
-        f"""
-        <div style="background-color: {color}15; border-left: 6px solid {color}; padding: 16px; border-radius: 6px; margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-                <span style="font-size: 2.4rem; font-weight: bold; color: #111;">{aqi_val:.0f} <span style="font-size: 1.1rem; font-weight: normal; color: #555;">AQI</span></span>
-                <span style="background-color: {color}; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.95rem;">{category}</span>
-            </div>
-            <div style="margin-top: 6px; font-size: 0.9rem; color: #444;">
-                <b>Dominant Pollutant:</b> <code>{dominant.upper()}</code>
-            </div>
-            <div style="margin-top: 8px; font-size: 0.92rem; line-height: 1.4; color: #222;">
-                <b>Public Health Advisory:</b> {advisory}
-            </div>
-        </div>
-        """,
+        f'<div class="prl-status-line">'
+        f'<span class="prl-status-dot"></span>'
+        f"Updated {age_str} &nbsp;·&nbsp; {src_label}"
+        f"</div>",
         unsafe_allow_html=True,
     )
 
 
+# ── Telemetry breakdown (Pollutants + Weather) ────────────────────────────────
+
 def render_telemetry_breakdown(obs: dict[str, Any]) -> None:
-    """Render pollutant concentrations and surface weather conditions."""
+    """Render compact two-card pollutant and weather grid.
+
+    Args:
+        obs: Latest observation dictionary matching API contract.
+    """
     pollutants = obs.get("pollutants", {})
     weather = obs.get("weather", {})
 
-    st.subheader("Telemetry Observations")
-    p_col1, p_col2, p_col3, p_col4, p_col5, p_col6 = st.columns(6)
-    with p_col1:
-        st.metric("PM2.5", f"{pollutants.get('pm2_5', 'N/A')} µg/m³")
-    with p_col2:
-        st.metric("PM10", f"{pollutants.get('pm10', 'N/A')} µg/m³")
-    with p_col3:
-        st.metric("NO₂", f"{pollutants.get('no2', 'N/A')} µg/m³")
-    with p_col4:
-        st.metric("SO₂", f"{pollutants.get('so2', 'N/A')} µg/m³")
-    with p_col5:
-        st.metric("CO", f"{pollutants.get('co', 'N/A')} µg/m³")
-    with p_col6:
-        st.metric("O₃", f"{pollutants.get('o3', 'N/A')} µg/m³")
+    col_p, col_w = st.columns(2, gap="medium")
 
-    w_col1, w_col2, w_col3, w_col4 = st.columns(4)
-    with w_col1:
-        st.metric("Temperature", f"{weather.get('temperature_2m', 'N/A')} °C")
-    with w_col2:
-        st.metric("Humidity", f"{weather.get('relative_humidity_2m', 'N/A')} %")
-    with w_col3:
-        st.metric("Wind Speed", f"{weather.get('wind_speed_10m', 'N/A')} m/s")
-    with w_col4:
-        st.metric("Pressure", f"{weather.get('surface_pressure', 'N/A')} hPa")
+    with col_p:
+        pm25 = safe_val(pollutants.get("pm2_5"), "µg/m³", 1)
+        pm10 = safe_val(pollutants.get("pm10"), "µg/m³", 1)
+        no2 = safe_val(pollutants.get("no2"), "µg/m³", 1)
+        so2 = safe_val(pollutants.get("so2"), "µg/m³", 1)
+        co = safe_val(pollutants.get("co"), "µg/m³", 1)
+        o3 = safe_val(pollutants.get("o3"), "µg/m³", 1)
+        st.markdown(
+            f"""
+<div class="prl-card">
+  <div class="prl-card-title">Air Pollutants</div>
+  <div class="prl-metric-grid">
+    <div class="prl-metric-pill"><div class="prl-metric-label">PM2.5</div><div class="prl-metric-value">{pm25}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">PM10</div><div class="prl-metric-value">{pm10}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">O₃</div><div class="prl-metric-value">{o3}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">NO₂</div><div class="prl-metric-value">{no2}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">SO₂</div><div class="prl-metric-value">{so2}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">CO</div><div class="prl-metric-value">{co}</div></div>
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
+    with col_w:
+        temp = safe_val(weather.get("temperature_2m"), "°C", 1)
+        hum = safe_val(weather.get("relative_humidity_2m"), "%", 0)
+        wind = safe_val(weather.get("wind_speed_10m"), "m/s", 1)
+        pres = safe_val(weather.get("surface_pressure"), "hPa", 1)
+        precip = safe_val(weather.get("precipitation"), "mm", 1) if weather.get("precipitation") is not None else None
+        precip_row = (
+            f'<div class="prl-metric-pill"><div class="prl-metric-label">Precip.</div>'
+            f'<div class="prl-metric-value">{precip}</div></div>'
+            if precip is not None else ""
+        )
+        st.markdown(
+            f"""
+<div class="prl-card">
+  <div class="prl-card-title">Weather Conditions</div>
+  <div class="prl-metric-grid">
+    <div class="prl-metric-pill"><div class="prl-metric-label">Temperature</div><div class="prl-metric-value">{temp}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">Humidity</div><div class="prl-metric-value">{hum}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">Wind</div><div class="prl-metric-value">{wind}</div></div>
+    <div class="prl-metric-pill"><div class="prl-metric-label">Pressure</div><div class="prl-metric-value">{pres}</div></div>
+    {precip_row}
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+
+# ── Health Guidance section ───────────────────────────────────────────────────
+
+def render_health_guidance(obs_data: dict[str, Any], forecast_data: dict[str, Any]) -> None:
+    """Render Health Guidance card using category-level advisory text.
+
+    Shows current category advice; optionally shows forecast severity upgrade
+    notice when forecast severity exceeds current severity.
+
+    Args:
+        obs_data: Latest observation dictionary matching API contract.
+        forecast_data: Forecast result dictionary matching API contract.
+    """
+    category = obs_data.get("category", "Unknown")
+    advisory = obs_data.get("health_advisory", "")
+    icon = category_icon(category)
+    color = obs_data.get("color") or category_color(category)
+
+    # Check if forecast is worse than current
+    _rank = {"none": 0, "advisory": 1, "warning": 2, "severe": 3, "hazardous": 4}
+    obs_alert = obs_data.get("alert") or {}
+    obs_rank = _rank.get(obs_alert.get("level", "none"), 0)
+
+    f_alert = (
+        forecast_data.get("forecast_alert")
+        or forecast_data.get("summary", {}).get("forecast_alert")
+        or {}
+    )
+    f_level = f_alert.get("highest_level", "none")
+    f_rank = _rank.get(f_level, 0)
+    f_peak_cat = f_alert.get("peak_category", "")
+    f_peak_h = f_alert.get("peak_horizon")
+
+    upgrade_html = ""
+    if f_rank > obs_rank and f_rank >= 2:
+        upgrade_html = (
+            f'<div class="prl-guidance-upgrade">'
+            f"📈 <b>Forecast outlook:</b> Air quality is expected to reach <b>{f_peak_cat}</b> "
+            f"conditions within 72 hours "
+            + (f"(peak at {format_horizon_label(f_peak_h)}). " if f_peak_h else ". ")
+            + "Monitor updates and take precautions."
+            + "</div>"
+        )
+
+    st.markdown(
+        f"""
+<div class="prl-guidance-card">
+  <span class="prl-guidance-icon">{icon}</span>
+  <div class="prl-guidance-headline" style="color:{color};">{category}</div>
+  <div class="prl-guidance-body">{advisory or "Air quality information is currently unavailable."}</div>
+  {upgrade_html}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# ── Model & System Details expander ──────────────────────────────────────────
+
+def render_model_system_details(
+    model_info: dict[str, Any],
+    forecast_data: dict[str, Any],
+    obs_data: dict[str, Any],
+    source_mode: str,
+) -> None:
+    """Render collapsed Model & System Details expander with all technical provenance.
+
+    Args:
+        model_info: Model metadata dictionary matching API contract.
+        forecast_data: Forecast result dictionary matching API contract.
+        obs_data: Latest observation dictionary.
+        source_mode: Data source mode string.
+    """
+    with st.expander("🔬 Model & System Details", expanded=False):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Champion Model**")
+            st.markdown(f"- **ID:** `{model_info.get('model_id', 'EXP-019')}`")
+            st.markdown(f"- **Architecture:** `{model_info.get('architecture', 'Hybrid Specialist')}`")
+            st.markdown(f"- **Input Dimensionality:** `{model_info.get('feature_count', 114)} canonical features`")
+            st.markdown(f"- **Schema Version:** `{model_info.get('feature_schema_version', 'v2_weather_enriched')}`")
+            st.markdown(f"- **Status:** `{model_info.get('status', 'validated_champion')}`")
+            st.markdown(f"- **Data Pipeline:** `{source_mode}`")
+            st.markdown(f"- **Feature Source:** `{obs_data.get('feature_source', '—')}`")
+
+            benchmarks = model_info.get("test_benchmark_metrics", {})
+            if benchmarks:
+                st.markdown("**Held-Out Test Benchmarks (Phase 10.5E)**")
+                st.markdown(f"- **Overall RMSE:** `{benchmarks.get('overall_rmse')} AQI`")
+                st.markdown(f"- **Overall MAE:** `{benchmarks.get('overall_mae')} AQI`")
+                st.markdown(f"- **Overall R²:** `{benchmarks.get('overall_r2')}`")
+                st.markdown(f"- **h+1 RMSE:** `{benchmarks.get('h1_rmse')} AQI`")
+                st.markdown(f"- **h+72 RMSE:** `{benchmarks.get('h72_rmse')} AQI`")
+
+        with col2:
+            st.markdown("**Forecast Provenance**")
+            forecast_origin = forecast_data.get("forecast_origin", "—")
+            generated_at = forecast_data.get("generated_at", "—")
+            latency_ms = forecast_data.get("inference_latency_ms", 0.0)
+            input_observed = forecast_data.get(
+                "input_observed_at", obs_data.get("input_observed_at", "—")
+            )
+            age_hours = forecast_data.get(
+                "input_age_hours", obs_data.get("input_age_hours", None)
+            )
+            st.markdown(f"- **Forecast Origin:** `{format_timestamp(forecast_origin)}`")
+            st.markdown(f"- **Input Observed At:** `{format_timestamp(input_observed)}`")
+            st.markdown(f"- **Input Age:** `{safe_val(age_hours, 'h', 1)}`")
+            st.markdown(f"- **Generated At:** `{format_timestamp(generated_at)}`")
+            st.markdown(f"- **Inference Latency:** `{latency_ms:.1f} ms`")
+
+            summary = forecast_data.get("summary", {})
+            if summary:
+                st.markdown("**72-Hour Forecast Summary**")
+                st.markdown(f"- **Peak AQI:** `{safe_val(summary.get('peak_aqi'), decimals=1)}`")
+                st.markdown(f"- **Peak Horizon:** `{format_horizon_label(summary.get('peak_horizon'))}`")
+                st.markdown(f"- **Peak Category:** `{summary.get('peak_category', '—')}`")
+
+
+# ── Cold-start / connection error state ──────────────────────────────────────
+
+def render_cold_start_error(error: Exception) -> None:
+    """Render user-friendly service-waking-up screen.
+
+    Shows friendly messaging for connection errors; hides raw exception by
+    default with an expandable technical details section.
+
+    Args:
+        error: The caught exception (ConnectionError or similar).
+    """
+    st.markdown(
+        """
+<div class="prl-cold-start">
+  <span class="prl-cold-start-icon">🌫️</span>
+  <div class="prl-cold-start-title">Forecast service is waking up</div>
+  <div class="prl-cold-start-body">
+    The forecasting service is starting from standby.
+    This usually takes less than a minute. Click <b>Retry</b> to check again.
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    if st.button("🔄 Retry", help="Check if the service is back online"):
+        st.rerun()
+    with st.expander("Technical details", expanded=False):
+        st.code(str(error))
+
+
+# ── Sidebar (no-op stub — content moved to Model & System Details) ────────────
 
 def render_sidebar(model_info: dict[str, Any], summary: dict[str, Any], source_mode: str) -> None:
-    """Render sidebar with model provenance, architecture, and forecast summary."""
-    st.sidebar.title("System & Model Provenance")
+    """No-op stub. All model/provenance content now lives in render_model_system_details.
 
-    st.sidebar.markdown(f"**Data Pipeline:** `{source_mode}`")
+    Signature preserved for backward compatibility with existing test imports.
 
-    st.sidebar.subheader("Champion Model (EXP-019)")
-    st.sidebar.markdown(f"- **Architecture:** `{model_info.get('architecture', 'Hybrid Specialist')}`")
-    st.sidebar.markdown(f"- **Input Dimensionality:** `{model_info.get('feature_count', 114)} canonical features`")
-    st.sidebar.markdown(f"- **Schema Version:** `{model_info.get('feature_schema_version', 'v2_weather_enriched')}`")
-    st.sidebar.markdown(f"- **Status:** `{model_info.get('status', 'validated_champion')}`")
+    Args:
+        model_info: Model metadata dictionary (unused — displayed in expander).
+        summary: Forecast summary dictionary (unused — displayed in expander).
+        source_mode: Data source mode string (unused).
+    """
+    # Content intentionally moved to render_model_system_details in app.py.
+    pass
 
-    benchmarks = model_info.get("test_benchmark_metrics", {})
-    if benchmarks:
-        st.sidebar.subheader("Held-Out Test Benchmark (Phase 10.5E)")
-        st.sidebar.markdown(f"- **Overall RMSE:** `{benchmarks.get('overall_rmse')} AQI`")
-        st.sidebar.markdown(f"- **Overall MAE:** `{benchmarks.get('overall_mae')} AQI`")
-        st.sidebar.markdown(f"- **Overall R²:** `{benchmarks.get('overall_r2')}`")
-        st.sidebar.markdown(f"- **h+1 RMSE:** `{benchmarks.get('h1_rmse')} AQI`")
-        st.sidebar.markdown(f"- **h+72 RMSE:** `{benchmarks.get('h72_rmse')} AQI`")
 
-    st.sidebar.subheader("72-Hour Forecast Summary")
-    if summary:
-        st.sidebar.markdown(f"- **Peak AQI:** `{summary.get('peak_aqi', 0.0):.1f}` (+{summary.get('peak_horizon', 0)}h)")
-        st.sidebar.markdown(f"- **Peak Category:** `{summary.get('peak_category', 'N/A')}`")
-
-        forecast_alert = summary.get("forecast_alert") or {}
-        highest_level = forecast_alert.get("highest_level")
-        if not highest_level:
-            if summary.get("has_hazardous"):
-                highest_level = "hazardous"
-            elif summary.get("has_high_severity"):
-                highest_level = "severe"
-            else:
-                highest_level = "none"
-
-        if highest_level == "hazardous":
-            first_h = forecast_alert.get("first_hazardous_horizon")
-            h_str = f" (first at +{first_h}h)" if first_h else ""
-            st.sidebar.error(f"🚨 **Hazardous AQI Emergency**: Forecast enters Hazardous (>=301){h_str}!")
-        elif highest_level == "severe":
-            first_h = forecast_alert.get("first_very_unhealthy_horizon")
-            h_str = f" (first at +{first_h}h)" if first_h else ""
-            st.sidebar.error(f"⚠️ **Very Unhealthy Alert**: Forecast enters Very Unhealthy (201–300){h_str}.")
-        elif highest_level == "warning":
-            first_h = forecast_alert.get("first_unhealthy_horizon")
-            h_str = f" (first at +{first_h}h)" if first_h else ""
-            st.sidebar.warning(f"⚠️ **Unhealthy Warning**: Forecast enters Unhealthy (151–200){h_str}.")
-        elif highest_level == "advisory":
-            first_h = forecast_alert.get("first_advisory_horizon")
-            h_str = f" (first at +{first_h}h)" if first_h else ""
-            st.sidebar.info(f"ℹ️ **Advisory**: Forecast enters Sensitive Groups (101–150){h_str}.")
-        else:
-            st.sidebar.success("Good or Moderate air quality across all 72 forecast hours.")
-
+# ── SHAP / Feature attribution ────────────────────────────────────────────────
 
 def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon: int) -> go.Figure:
     """Build horizontal bar chart for top SHAP feature attributions at a specific horizon.
@@ -395,7 +718,7 @@ def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon
     shaps_rev = [f["shap_value"] for f in reversed(top_features)]
     raws_rev = [f["raw_value"] for f in reversed(top_features)]
     scaleds_rev = [f["scaled_value"] for f in reversed(top_features)]
-    colors = ["#D32F2F" if v > 0 else "#388E3C" for v in shaps_rev]
+    colors = ["#1E3A5F" if v > 0 else "#6B7280" for v in shaps_rev]
 
     custom_data = list(zip(raws_rev, scaleds_rev))
 
@@ -417,71 +740,77 @@ def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon
     )
 
     fig.update_layout(
-        title=dict(
-            text=f"<b>Feature Attribution for Horizon +{horizon}h</b><br><sup>Top features moving model prediction relative to baseline reference</sup>",
-            x=0.01,
-            y=0.96,
-        ),
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FAFAFA",
+        title=None,
         xaxis=dict(
             title="SHAP Attribution (AQI contribution relative to reference)",
             zeroline=True,
-            zerolinecolor="#333",
-            zerolinewidth=1.5,
+            zerolinecolor="#9CA3AF",
+            zerolinewidth=1.2,
             showgrid=True,
-            gridcolor="rgba(0,0,0,0.06)",
+            gridcolor="rgba(0,0,0,0.05)",
+            tickfont=dict(size=10, color="#6B7280"),
+            title_font=dict(size=10, color="#6B7280"),
         ),
         yaxis=dict(
             title="",
             automargin=True,
+            tickfont=dict(size=10, color="#374151"),
         ),
-        margin=dict(l=10, r=20, t=60, b=40),
-        height=380,
+        margin=dict(l=10, r=20, t=20, b=40),
+        height=360,
     )
     return fig
 
 
 def render_explainability_section(explanation: dict[str, Any]) -> None:
-    """Render interactive model explainability and persistence decomposition section."""
-    st.subheader("Model Explainability & Feature Attribution")
-    st.caption("SHAP attributions and persistence blending decomposition for EXP-019 hybrid architecture.")
+    """Render model explainability and persistence decomposition.
 
+    Called inside the 'Forecast Drivers' tab of Advanced Insights.
+
+    Args:
+        explanation: Explanation dictionary from /api/explain endpoint.
+    """
     h = explanation.get("horizon", 24)
     spec_type = explanation.get("specialist_type", "Specialist")
     w = explanation.get("blend_weight", 1.0)
-    raw_spec = explanation.get("raw_specialist_output", 0.0)
     m_comp = explanation.get("model_component", 0.0)
     p_comp = explanation.get("persistence_component", 0.0)
     preclip = explanation.get("explained_output_preclip", 0.0)
     pred_aqi = explanation.get("predicted_aqi", 0.0)
     base_val = explanation.get("base_value", 0.0)
-    err = explanation.get("additivity_error", 0.0)
 
-    # 1. Decomposition Metric Cards
+    # Decomposition compact row
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        st.metric("Specialist Sub-Model", spec_type)
+        st.metric("Sub-Model", spec_type)
     with c2:
         st.metric("Blend Weight (w)", f"{w:.2f}")
     with c3:
-        st.metric("Model Component", f"{m_comp:.1f}")
+        st.metric("Model Component", safe_val(m_comp, decimals=1))
     with c4:
-        st.metric("Persistence Term", f"{p_comp:.1f}")
+        st.metric("Persistence Term", safe_val(p_comp, decimals=1))
     with c5:
-        st.metric("Pre-Clip Output", f"{preclip:.1f}", delta=f"Final AQI: {pred_aqi:.1f}")
+        st.metric("Pre-Clip Output", safe_val(preclip, decimals=1), delta=f"Final: {pred_aqi:.1f}")
 
-    # 2. Plotly Waterfall / Attribution Chart
+    # SHAP chart
     top_features = explanation.get("top_features", [])
     if top_features:
+        st.caption(
+            f"Top features driving the horizon +{h}h prediction relative to the model's "
+            f"baseline reference (SHAP, base value: {base_val:.1f})."
+        )
         fig = build_feature_attribution_figure(top_features, h)
         st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Feature attribution data not available for this horizon.")
 
-    # 3. Global Top Features & Persistence Table
+    # Global importance
     with st.expander("📊 Global Multi-Horizon Feature Importance (500-Sample Stratified Cohort)"):
         p_mean = explanation.get("global_persistence_mean_contribution", 0.0)
         st.markdown(f"**Mean Absolute Persistence Contribution across 72h:** `{p_mean:.2f} AQI points`")
-
         global_feats = explanation.get("global_top_features", [])
         if global_feats:
             df_global = pd.DataFrame(global_feats)
             st.dataframe(df_global, use_container_width=True, hide_index=True)
-
