@@ -20,10 +20,15 @@ class TestAQIPredictor:
 
     @pytest.fixture
     def predictor(self, tmp_path: Path) -> AQIPredictor:
+        from src.inference.observation_resolver import FeatureObservationResolver
         loader = ModelLoader()
         processor = AQIPostProcessor()
         cache = PredictionCache(cache_file=tmp_path / "test_cache.json")
-        return AQIPredictor(model_loader=loader, post_processor=processor, cache=cache)
+        resolver = FeatureObservationResolver(mode="bootstrap")
+        return AQIPredictor(model_loader=loader, post_processor=processor, cache=cache, observation_resolver=resolver)
+
+
+
 
     @pytest.fixture
     def sample_feature_df(self) -> pd.DataFrame:

@@ -96,7 +96,10 @@ class TestRuntimeAssetResolver:
 class TestCleanBootstrapInferenceParity:
     """Test suite ensuring clean bootstrap inference functions without historical CSVs."""
 
-    def test_api_current_endpoint_bootstrap_parity(self):
+    def test_api_current_endpoint_bootstrap_parity(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_SOURCE_MODE", "bootstrap")
+        import src.api.routes
+        src.api.routes._predictor = None
         app = create_app({"TESTING": True})
         client = app.test_client()
         resp = client.get("/api/current")
@@ -110,9 +113,11 @@ class TestCleanBootstrapInferenceParity:
     def test_bootstrap_matches_csv_observation_parity(self):
         from src.config import PROCESSED_DATA_DIR
         from src.inference.predictor import AQIPredictor
-        pred = AQIPredictor()
+        from src.inference.observation_resolver import FeatureObservationResolver
+        resolver_local = FeatureObservationResolver(mode="bootstrap")
+        pred = AQIPredictor(observation_resolver=resolver_local)
         csv_obs = pred.get_latest_observation(dataset_path=PROCESSED_DATA_DIR / "features_v2_weather.csv")
-        
+
         resolver = RuntimeAssetResolver(mode="runtime")
         _, bootstrap_meta = resolver.load_bootstrap_feature_vector()
         
@@ -122,7 +127,10 @@ class TestCleanBootstrapInferenceParity:
         assert csv_obs["weather"] == bootstrap_meta["weather"]
         assert csv_obs["input_observed_at"] == bootstrap_meta["input_observed_at"].isoformat()
 
-    def test_api_forecast_endpoint_returns_72_horizons(self):
+    def test_api_forecast_endpoint_returns_72_horizons(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_SOURCE_MODE", "bootstrap")
+        import src.api.routes
+        src.api.routes._predictor = None
         app = create_app({"TESTING": True})
         client = app.test_client()
         resp = client.get("/api/forecast")
@@ -132,11 +140,17 @@ class TestCleanBootstrapInferenceParity:
         assert data["forecast_origin"] == "2026-08-31T07:00:00+00:00"
         assert data["is_stale"] is True
 
-    def test_api_explain_endpoint_parity_with_forecast(self):
+    def test_api_explain_endpoint_parity_with_forecast(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_SOURCE_MODE", "bootstrap")
+        import src.api.routes
+        src.api.routes._predictor = None
         app = create_app({"TESTING": True})
         client = app.test_client()
         forecast_resp = client.get("/api/forecast").get_json()
         h24_forecast = forecast_resp["forecasts"][23]["aqi"]
+
+
+
 
         explain_resp = client.get("/api/explain?horizon=24&top_k=5").get_json()
         assert explain_resp["predicted_aqi"] == pytest.approx(h24_forecast, abs=0.1)

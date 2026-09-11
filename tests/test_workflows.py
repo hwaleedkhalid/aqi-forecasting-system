@@ -105,8 +105,12 @@ class TestAutomationRunners:
         mock_aq = {"list": [{"main": {"aqi": 3}}]}
         mock_weather = {"main": {"temp": 28.5}}
 
-        with patch("src.data_ingestion.openweather_provider.OpenWeatherProvider.fetch_current_air_quality", return_value=mock_aq), \
-             patch("src.data_ingestion.openweather_provider.OpenWeatherProvider.fetch_current_weather", return_value=mock_weather):
+        with patch("src.feature_pipeline.run_hourly_ingestion.OpenWeatherProvider") as mock_provider_cls:
+            mock_inst = MagicMock()
+            mock_inst.fetch_current_air_quality.return_value = mock_aq
+            mock_inst.fetch_current_weather.return_value = mock_weather
+            mock_provider_cls.return_value = mock_inst
+
             report = run_ingestion(dry_run=False, api_key="valid_key", output_dir=tmp_path)
             assert report["status"] == "live_ingestion_success"
             assert report["mode"] == "live"
@@ -119,7 +123,8 @@ class TestAutomationRunners:
         assert prod_path.exists(), "Production model artifact must exist"
         initial_mtime = prod_path.stat().st_mtime
 
-        report = run_candidate_evaluation(output_dir=tmp_path)
+        csv_path = Path("data/processed/features_v2_weather.csv")
+        report = run_candidate_evaluation(output_dir=tmp_path, dry_run=True, offline_data_path=csv_path)
 
         # Assert report was written to candidate output directory
         assert report["status"] == "candidate_evaluation_completed"
