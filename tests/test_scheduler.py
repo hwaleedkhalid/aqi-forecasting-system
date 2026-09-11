@@ -15,9 +15,10 @@ class TestIndependentScheduler:
     def test_trigger_dispatch_missing_token_raises(self, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("GH_TOKEN", raising=False)
-        with pytest.raises(ValueError) as exc_info:
-            trigger_github_repository_dispatch(github_token=None)
-        assert "GITHUB_TOKEN is required" in str(exc_info.value)
+        with patch("src.feature_pipeline.scheduler.resolve_github_token", return_value=None):
+            with pytest.raises(ValueError) as exc_info:
+                trigger_github_repository_dispatch(github_token=None)
+            assert "GITHUB_TOKEN is required" in str(exc_info.value)
 
     @patch("src.feature_pipeline.scheduler.requests.post")
     def test_trigger_dispatch_success(self, mock_post):
