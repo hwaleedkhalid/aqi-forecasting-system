@@ -24,6 +24,29 @@ from src.feature_pipeline.run_hourly_ingestion import run_hourly_pipeline
 DEFAULT_REPO = os.environ.get("GITHUB_REPOSITORY", "hwaleedkhalid/aqi-forecasting-system")
 
 
+def resolve_github_token(explicit_token: str | None = None) -> str | None:
+    """Resolve GitHub token from explicit arg, environment variables, or git credential helper."""
+    if explicit_token:
+        return explicit_token
+    env_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_PAT")
+    if env_token:
+        return env_token
+    try:
+        import subprocess
+        p = subprocess.Popen(
+            ["git", "credential", "fill"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        out, _ = p.communicate(input="protocol=https\nhost=github.com\n\n", timeout=5)
+        creds = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+        return creds.get("password")
+    except Exception:
+        return None
+
+
 def trigger_github_repository_dispatch(
     github_token: str | None = None,
     repo: str = DEFAULT_REPO,
@@ -33,7 +56,7 @@ def trigger_github_repository_dispatch(
     """Send repository_dispatch event to trigger GitHub Actions feature pipeline.
 
     Args:
-        github_token: GitHub Personal Access Token (PAT) with Actions write permissions.
+        github_token: GitHub Personal Access Token (PAT) with repository 'Contents: Read and Write' permissions.
         repo: Target GitHub repository (owner/repo).
         event_type: Event type identifier matching workflow trigger.
         client_payload: Optional JSON payload for the dispatch.
@@ -41,16 +64,15 @@ def trigger_github_repository_dispatch(
     Returns:
         Status report dictionary.
     """
-    if github_token is None:
-        github_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = resolve_github_token(github_token)
 
-    if not github_token:
+    if not token:
         raise ValueError("GITHUB_TOKEN is required to send repository_dispatch to GitHub Actions.")
 
     url = f"https://api.github.com/repos/{repo}/dispatches"
     headers = {
         "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {github_token}",
+        "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "Pearls-Hourly-Scheduler",
     }
