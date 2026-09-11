@@ -7,7 +7,7 @@ The production champion model is EXP-019 (Persistence-Aware Hybrid Model).
 ## Live Demo
 
 * **Frontend Dashboard**: [https://aqi-forecasting.streamlit.app](https://aqi-forecasting.streamlit.app) (Hosted on Streamlit Community Cloud)
-* **Backend REST API**: [https://aqi-forecasting-xyyb.onrender.com/api](https://aqi-forecasting-xyyb.onrender.com/api) (Hosted on Render)
+* **Backend REST API**: [https://aqi-forecasting-api.onrender.com/api](https://aqi-forecasting-api.onrender.com/api) (Hosted on Render)
 
 *Note: These represent the verified deployment endpoints at final project deployment and testing time. Third-party hosting availability is not permanently guaranteed.*
 
@@ -62,7 +62,7 @@ The model takes a 114 weather-enriched input feature vector scaled via StandardS
 * **Platform**: Streamlit Community Cloud (Python 3.10)
 * **Entrypoint**: `src/dashboard/app.py`
 * **Dependencies**: `src/dashboard/requirements.txt` (lightweight frontend subset: streamlit, plotly, pandas, requests, python-dotenv)
-* **Environment Configuration**: `FLASK_API_URL=https://aqi-forecasting-xyyb.onrender.com/api`, `ENABLE_LOCAL_FALLBACK=false`
+* **Environment Configuration**: `FLASK_API_URL=https://aqi-forecasting-api.onrender.com/api`, `ENABLE_LOCAL_FALLBACK=false`
 
 ## Runtime Assets
 
