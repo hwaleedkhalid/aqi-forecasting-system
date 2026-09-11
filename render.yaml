@@ -1,0 +1,37 @@
+services:
+  # 1. Production Flask REST API Web Service
+  - type: web
+    name: aqi-forecasting-api
+    env: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT src.api.app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: HOPSWORKS_API_KEY
+        sync: false
+      - key: HOPSWORKS_PROJECT
+        value: aqi_predictor_by_Waleed
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "https://aqi-forecasting.streamlit.app,http://localhost:8501,http://127.0.0.1:8501"
+
+  # 2. Independent Hourly Ingestion Cron Job Trigger (Minute :15 UTC)
+  - type: cron
+    name: aqi-hourly-ingest-trigger
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "15 * * * *"
+    buildCommand: pip install requests
+    startCommand: python -m src.feature_pipeline.scheduler --dispatch-now
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPOSITORY
+        value: hwaleedkhalid/aqi-forecasting-system
