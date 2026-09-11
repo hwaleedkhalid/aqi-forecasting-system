@@ -3,577 +3,472 @@
 ## 1. Introduction and Problem Statement
 
 ### 1.1 Problem Context
-Air quality in Lahore, Pakistan (31.55°N, 74.34°E) is consistently ranked among the worst globally, posing severe public health risks. The situation becomes particularly acute during the winter smog season, which typically spans from November to February. While real-time monitoring infrastructure exists and provides current pollutant levels, there is a critical gap in actionable, hour-ahead forecasting. Public health planning, school closures, and personal mitigation strategies require reliable advance warning rather than just reactive monitoring.
+Air quality in Lahore, Pakistan (31.55°N, 74.34°E) is consistently ranked among the worst globally, posing severe public health risks. The situation becomes particularly acute during the winter smog season, which typically spans from November to February. While monitoring infrastructure provides observations of current pollutant levels, there is a critical operational gap in actionable, multi-hour-ahead forecasting. Public health planning, municipal advisories, school closures, and personal mitigation strategies require reliable advance warning rather than solely reactive monitoring.
 
 ### 1.2 Project Goal
-The primary objective of this project was to architect and build a serverless, 72-hour air quality forecasting system. The system predicts the US Environmental Protection Agency (EPA) Air Quality Index (AQI), which operates on a standardized 0 to 500 scale. The forecast horizon was defined as 72 continuous hourly predictions to provide a practical three-day operational window.
+The primary objective of this project was to architect, validate, and deploy a cloud-native, fully managed 72-hour air quality forecasting and MLOps system. The system predicts the US Environmental Protection Agency (EPA) Air Quality Index (AQI) on its standardized 0 to 500 scale across 72 continuous hourly horizons ($h=1, \dots, 72$), providing a three-day operational window.
+
+While the original educational specification described a "100% serverless" stack, the production implementation uses managed cloud platforms (Streamlit Community Cloud, Render Web Services and Cron Jobs, GitHub Actions, and Hopsworks Feature Store). This architecture fulfills the operational intent of zero self-managed server infrastructure while leveraging purpose-built managed services for WSGI serving, scheduled triggers, and online feature retrieval. A persistent Render WSGI web service does not satisfy a strict Function-as-a-Service (FaaS) definition, but represents a practical, cloud-native managed deployment.
 
 ### 1.3 Data Sources
-The forecasting system relies on two primary data streams:
-*   **OpenWeather Air Pollution History API**: Provided historical concentrations from November 27, 2020 to the present for seven key pollutants: Particulate Matter 2.5 (PM2.5), Particulate Matter 10 (PM10), Nitrogen Dioxide (NO2), Sulfur Dioxide (SO2), Carbon Monoxide (CO), Ozone (O3), and Ammonia (NH3).
-*   **Open-Meteo Historical Weather Archive**: Provided essential meteorological covariates, including 2-meter temperature, 2-meter relative humidity, surface pressure, 10-meter wind speed, 10-meter wind direction, and precipitation.
+The forecasting system integrates two primary external telemetry providers:
+*   **OpenWeather Air Pollution History API**: Provides historical and near-real-time concentrations from November 27, 2020 to the present for eight pollutant components: Carbon Monoxide ($\text{CO}$), Nitrogen Monoxide ($\text{NO}$), Nitrogen Dioxide ($\text{NO}_2$), Ozone ($\text{O}_3$), Sulfur Dioxide ($\text{SO}_2$), Particulate Matter 2.5 ($\text{PM}_{2.5}$), Particulate Matter 10 ($\text{PM}_{10}$), and Ammonia ($\text{NH}_3$).
+*   **Open-Meteo Historical Weather Archive & Forecast API**: Provides essential meteorological covariates, including 2-meter temperature, 2-meter relative humidity, surface pressure, 10-meter wind speed, 10-meter wind direction, and precipitation.
+
+---
 
 ## 2. Preparation and Learning
 
-Before diving into code implementation, I spent approximately my first week focused entirely on preparation, reviewing resources shared on the course Discord server. This dedicated study period covered Git and GitHub workflows, Python project structuring, CI/CD with GitHub Actions, and machine learning pipelines.
+Before writing application code, the first week was dedicated to foundational preparation, reviewing resources shared on the course Discord server. This study period covered Git and GitHub workflows, Python project structuring, CI/CD automation with GitHub Actions, and production machine learning pipelines.
 
-While core machine learning, Python programming, and data manipulation concepts were familiar from prior university coursework, I recognized the need for a practical refresh before applying them to a robust, end-to-end system. The Git and GitHub resources were particularly valuable in establishing strict version control habits right from the project's inception. 
+While core machine learning, Python programming, and data manipulation concepts were familiar from university coursework, translating them into an automated, fault-tolerant production system required structured preparation. Version control best practices established strict Git hygiene from repository inception.
 
-Conversely, GitHub Actions and CI/CD pipelines were comparatively new topics to me. The Discord materials provided a crucial foundational understanding of these systems. I engaged with the material actively, ensuring I understood the mechanics of how CI pipelines execute, the secure management of repository secrets, the behavior of workflow triggers, and the lifecycle of pipeline artifacts. This upfront investment paid massive dividends later in the project; when it came time to implement the automation pipelines in Phase 15, the process was significantly smoother than I anticipated because the conceptual framework was already in place.
+GitHub Actions and CI/CD pipelines were comparatively new topics. Engaging with the course materials provided an understanding of runner lifecycles, ephemeral virtual environments, encrypted secret handling, event triggers (`schedule`, `workflow_dispatch`, `repository_dispatch`), and workflow artifact persistence. This preparation proved foundational when designing the dual-scheduler feature pipeline, automated candidate model evaluation, and cross-platform CI test suites.
+
+---
 
 ## 3. Data Collection and Exploration
 
 ### 3.1 Historical Data Ingestion
-The foundational dataset was acquired from the OpenWeather Air Pollution History API, starting from the earliest available Unix timestamp (1606482000, corresponding to Nov 27, 2020). To handle the volume and network constraints, I implemented a robust historical backfill mechanism. The download was executed in monthly chunks using Python's `ThreadPoolExecutor` with `max_workers=5`. 
+The foundational dataset was acquired from the OpenWeather Air Pollution History API, starting from the earliest available Unix timestamp (`1606482000`, corresponding to November 27, 2020 13:00:00 UTC). To handle network constraints and rate limits, a historical backfill module (`src/feature_pipeline/backfill.py`) was implemented. Downloads were executed in monthly chunks using `concurrent.futures.ThreadPoolExecutor` with worker throttling (`max_workers=5`).
 
-Network resilience was built in through an exponential backoff retry strategy, allowing 3 retries with a 1.0-second base delay. Furthermore, to prevent corrupted partial files in the event of failure, the data was written using atomic writes via a `.tmp` file rename pattern.
+Network resilience was built in through an exponential backoff retry strategy (3 retries with a 1.0-second base delay). To prevent corrupted partial files in the event of failure, data was written using atomic writes via a `.tmp` file rename pattern.
 
-### 3.2 Dataset Validation
-Upon collection, the raw data underwent a rigorous completeness audit. I enforced a `MIN_COMPLETENESS_RATIO` of 0.95 (95%), ensuring that the temporal integrity of the time series was sufficient for sequential modeling. The final corpus comprised approximately 50,000 hourly records. I also implemented preprocessing to handle specific missing sensor sentinel values (recorded as -9999).
+### 3.2 Dataset Validation & Completeness
+Raw data underwent a completeness audit enforcing a `MIN_COMPLETENESS_RATIO` of 0.95 (95%). While overall historical completeness exceeded this threshold across the multi-year corpus, the raw time series was not perfectly continuous and contained occasional missing hourly timestamps due to upstream sensor dropouts. Preprocessing handled missing sensor sentinel values (recorded as `-9999`). Downstream training integrity was preserved by implementing exact physical timestamp target construction and boundary-gap filtering rather than assuming unbroken row sequences.
 
 ### 3.3 Meteorological Covariates
-To supplement the pollutant data, I integrated the Open-Meteo weather archive. I retrieved historical temperature (2m), relative humidity (2m), surface pressure, wind speed (10m), wind direction (10m), and precipitation. These variables were subjected to strict atmospheric validation bounds:
-*   Temperature bounded from -50°C to 65°C
-*   Relative humidity bounded from 0% to 100%
-*   Wind speed constrained to non-negative values
+To supplement pollutant measurements, historical weather data was retrieved from the Open-Meteo archive. Variables were validated against atmospheric physical bounds:
+*   Temperature: bounded within $[-50^\circ\text{C}, 65^\circ\text{C}]$
+*   Relative humidity: bounded within $[0\%, 100\%]$
+*   Surface pressure: bounded within $[800\text{ hPa}, 1100\text{ hPa}]$
+*   Wind speed: non-negative values
 
 The initial investigative work is documented in `01_api_investigation.ipynb` and `02_raw_data_exploration.ipynb`.
 
+---
+
 ## 4. Feature Engineering
 
-The feature space evolved significantly over the project lifecycle, expanding from an initial set of 64 pollutant-only features to a comprehensive 114-feature set inclusive of meteorological data.
+The feature space evolved from an initial 64 pollutant-only set to a comprehensive **114 canonical production model-input columns** (which correspond to **113 fitted predictors** when `dt` is excluded during walk-forward validation and candidate evaluation). `dt` is retained in the canonical schema for temporal ordering, fold construction, physical timestamp alignment, and provenance tracking.
+
+```text
+Canonical Feature Schema Breakdown (114 Total Columns):
+├── Temporal & Cyclical Signals (7):
+│   hour_sin, hour_cos, day_sin, day_cos, month_sin, month_cos, is_weekend
+├── Base Pollutants & Calculated AQI (9):
+│   pm2_5, pm10, no2, so2, co, o3, nh3, no, epa_aqi
+├── Base Meteorology (7):
+│   temperature_2m, relative_humidity_2m, surface_pressure, wind_speed_10m, precipitation, wind_dir_sin, wind_dir_cos
+├── Pollutant Lags (25):
+│   1h, 3h, 6h, 12h, 24h lags for pm2_5, pm10, no2, o3, epa_aqi (5 variables × 5 lags)
+├── Weather Lags (20):
+│   1h, 3h, 6h, 12h, 24h lags for temperature_2m, relative_humidity_2m, surface_pressure, wind_speed_10m (4 variables × 5 lags)
+├── Rolling Statistics (34):
+│   ├── Pollutant Rolling (16): 6h, 12h, 24h mean & std for pm2_5, epa_aqi (12) + 24h min & max for pm2_5, epa_aqi (4)
+│   └── Weather Rolling (18): 6h, 12h, 24h mean & std for temperature_2m, relative_humidity_2m, wind_speed_10m (3 variables × 6 stats)
+├── Differentials & Tendencies (6):
+│   pm2_5_diff_1h, pm2_5_diff_24h, epa_aqi_diff_1h, epa_aqi_diff_24h, pressure_diff_1h, pressure_diff_24h
+├── Chemical Ratios & Physical Indices (5):
+│   pm_ratio, nitrogen_ozone_ratio, combustion_index, thermal_moisture_index, stagnation_index
+└── Temporal Identifier (1):
+    dt (integral Unix timestamp; present in canonical schema, excluded from fitted regressors)
+```
 
 ### 4.1 Pollutant Features (Phase 6)
-The initial feature set focused entirely on the intrinsic patterns within the pollutant time series:
-1.  **Temporal Cyclical**: Trigonometric transformations of time components (hour_sin, hour_cos, day_sin, day_cos, month_sin, month_cos) and a boolean `is_weekend` flag.
-2.  **Historical Lags**: Specific historical observations at [1, 3, 6, 12, 24] hours prior for PM2.5, PM10, NO2, O3, and the overall EPA AQI.
-3.  **Rolling Aggregates**: Statistical summaries including mean and standard deviation over [6, 12, 24] hour windows for PM2.5 and EPA AQI, along with the 24-hour minimum and maximum values.
-4.  **Chemical Ratios**: Interaction features capturing chemical relationships, including `pm_ratio` (PM2.5/PM10), `nitrogen_ozone_ratio` (NO2/O3), and a `combustion_index` (CO/NO2).
-5.  **Rate of Change**: Short-term (1h) and diurnal (24h) deltas for PM2.5 and EPA AQI.
+The initial feature set focused on intrinsic pollutant dynamics:
+1.  **Temporal Cyclical Signals**: Sine/cosine trigonometric encodings for hour-of-day, day-of-year, and month, plus an `is_weekend` boolean flag.
+2.  **Historical Lags**: Lags at $[1, 3, 6, 12, 24]$ hours for $\text{PM}_{2.5}$, $\text{PM}_{10}$, $\text{NO}_2$, $\text{O}_3$, and $\text{EPA AQI}$.
+3.  **Rolling Aggregates**: Rolling mean and standard deviation over $[6, 12, 24]$ hours for $\text{PM}_{2.5}$ and $\text{EPA AQI}$, plus 24-hour min/max.
+4.  **Chemical Ratios**: Interaction features capturing atmospheric chemistry:
+    *   $\text{pm\_ratio} = \text{PM}_{2.5} / (\text{PM}_{10} + 1\text{e-}5)$
+    *   $\text{nitrogen\_ozone\_ratio} = \text{NO}_2 / (\text{O}_3 + 1\text{e-}5)$
+    *   $\text{combustion\_index} = \text{CO} / (\text{NO}_2 + 1\text{e-}5)$
+5.  **Rate of Change**: 1-hour and 24-hour differentials for $\text{PM}_{2.5}$ and $\text{EPA AQI}$.
 
 ### 4.2 Weather Features (Phase 10.5B)
-Recognizing that air pollution is heavily influenced by atmospheric physics, I enriched the dataset with Open-Meteo covariates:
-1.  **Trigonometric Wind Decomposition**: `wind_dir_sin` and `wind_dir_cos` to handle the circular nature of wind direction.
+Atmospheric conditions dictate pollutant dispersion, accumulation, and chemical reaction rates:
+1.  **Trigonometric Wind Decomposition**: `wind_dir_sin` and `wind_dir_cos` handling the circular topology of wind azimuth (derived from raw wind direction).
 2.  **Barometric Pressure Tendency**: 1-hour and 24-hour pressure differentials (`pressure_diff_1h`, `pressure_diff_24h`).
-3.  **Thermal Moisture Index**: A composite variable: `temperature_2m * (relative_humidity_2m / 100.0)`.
-4.  **Weather Lags**: Historical values at [1, 3, 6, 12, 24] hours for temperature, humidity, wind speed, and pressure.
-5.  **Weather Rolling Stats**: Rolling mean and standard deviation over [6, 12, 24] hours for temperature, humidity, and wind speed.
-6.  **Atmospheric Stagnation Index**: A custom formulation defined as `PM2.5 / (wind_speed + 0.5)` to capture accumulation under low-wind conditions.
+3.  **Thermal Moisture Index**: $\text{temperature\_2m} \times (\text{relative\_humidity\_2m} / 100.0)$.
+4.  **Weather Lags**: Lags at $[1, 3, 6, 12, 24]$ hours for temperature, humidity, wind speed, and surface pressure.
+5.  **Weather Rolling Stats**: Rolling mean and standard deviation over $[6, 12, 24]$ hours for temperature, humidity, and wind speed.
+6.  **Atmospheric Stagnation Index**: $\text{PM}_{2.5} / (\text{wind\_speed\_10m} + 0.5)$, capturing pollutant trapping during calm conditions.
 
 ### 4.3 EPA AQI Calculation
-The target variable, EPA AQI, is not a raw measurement but a synthetic index. I implemented the official US EPA piecewise linear interpolation formula:
-`I_p = ((I_high - I_low) / (C_high - C_low)) * (C_p - C_low) + I_low`
+The target variable, US EPA AQI, is computed using official piecewise linear interpolation:
+$$I_p = \frac{I_{\text{high}} - I_{\text{low}}}{C_{\text{high}} - C_{\text{low}}} (C_p - C_{\text{low}}) + I_{\text{low}}$$
 
-This was computed across six criteria pollutants (PM2.5, PM10, O3, NO2, SO2, CO). The overall AQI for a given hour is defined as the maximum of these sub-indices, clamped strictly to the [0, 500] range. All pollutant concentrations were truncated and rounded according to specific EPA rules prior to the calculation.
+This is computed across the six applicable criteria pollutants ($\text{PM}_{2.5}$, $\text{PM}_{10}$, $\text{O}_3$, $\text{NO}_2$, $\text{SO}_2$, $\text{CO}$). The overall AQI for an observation is the maximum sub-index across all six pollutants, bounded to $[0, 500]$ for historical labels while preserving unclipped floating-point outputs during model inference to track severe tail events.
 
-### 4.4 Winter/Smog Features (Phase 11.5 - Exploratory)
-Later in the project, I explored highly specialized features targeting the severe winter smog regime:
-1.  **Family 1: Thermal/Inversion Proxy**: Diurnal temperature range (24h), inversion risk proxy, and 6-hour temperature drop.
-2.  **Family 2: Fog/Mist Indicator**: A boolean `fog_proxy` (defined as RH>85% AND Temp<12°C AND Wind<2.0 m/s) and a rolling count of fog hours over 24 hours.
-3.  **Family 3: Stagnation Enhancement**: Rolling count of wind stagnation hours (12h/24h) and pressure stability over 24 hours.
-4.  **Family 4: Seasonal Emission Proxy**: A binary flag for the crop burning season (Oct 15-Nov 30) and a general winter emission intensity metric.
-*(Note: As discussed in Section 10, these features were ultimately not adopted into the champion model.)*
+### 4.4 Exploratory Winter/Smog Features (Phase 11.5)
+To investigate extreme winter errors, four candidate feature families were tested:
+1.  **Thermal / Inversion Proxies**: 24-hour diurnal temperature range, inversion risk proxy, 6-hour temperature drop.
+2.  **Fog / Mist Indicators**: `fog_proxy` ($\text{RH} > 85\% \land \text{Temp} < 12^\circ\text{C} \land \text{Wind} < 2.0\text{ m/s}$) and 24-hour rolling fog hours.
+3.  **Stagnation Enhancements**: 12h/24h rolling stagnation hours and 24h pressure stability.
+4.  **Seasonal Emission Proxies**: Crop-residue burning seasonal flag (Oct 15–Nov 30) and winter emission intensity metric.
 
-These efforts are detailed in `03_eda_and_aqi_conversion.ipynb`, `04_feature_engineering.ipynb`, and `10_weather_enrichment.ipynb`.
+*(Note: As detailed in Section 10, these candidate features did not satisfy adoption criteria and were not included in the production feature set.)*
+
+Documented in `03_eda_and_aqi_conversion.ipynb`, `04_feature_engineering.ipynb`, and `10_weather_enrichment.ipynb`.
+
+---
 
 ## 5. Dataset Preparation
 
-Formulating the dataset for sequence prediction required careful temporal alignment. 
-*   **Multi-Output Target Construction**: The target matrix was constructed by shifting the AQI series forward: `y_{t+h} = shift(-h)` for `h=1..72`.
-*   **Data Splitting**: I employed a strict chronological 80/20 train/test split. Random sampling cannot be used in time-series forecasting due to future-to-past data leakage.
-*   **Temporal Embargo**: To further prevent data leakage, a 72-hour embargo gap was enforced at the split boundary. Any training samples falling within 72 hours prior to the start of the test set were completely purged.
-*   **Scaling**: `StandardScaler` was fitted strictly on the training partition. The test set was subsequently transformed using these locked parameters without any refitting.
+Formulating the dataset for multi-horizon sequence forecasting required strict temporal alignment:
+*   **Multi-Output Target Construction**: The target matrix was constructed by forward-shifting the AQI series: $y_{t+h} = \text{AQI}_{t+h}$ for $h=1, \dots, 72$.
+*   **Chronological Split**: An 80/20 chronological split was enforced. Random k-fold sampling was prohibited to eliminate future-to-past data leakage.
+*   **Temporal Embargo**: A 72-hour embargo gap was enforced at the split boundary, purging training samples within 72 hours prior to the test partition.
+*   **Feature Scaling**: `StandardScaler` was fitted strictly on the training partition ($X_{\text{train}}$) and applied without re-fitting to the test partition.
 
-The final held-out test partition consisted of 9,311 samples spanning from 2025-06-07 to 2026-08-28 UTC. This process is documented in `05_dataset_preparation.ipynb`.
+The held-out test partition consisted of **9,311 samples** spanning from June 7, 2025 to August 28, 2026 UTC. (Documented in `05_dataset_preparation.ipynb`).
+
+---
 
 ## 6. Model Development Journey
 
-The modeling phase was structured as a progression of increasingly complex architectures, benchmarked against rigorous baselines.
+Model development progressed from simple baselines to multi-stage hybrid architectures.
 
-### 6.1 Phase 8: Ridge Regression + Naive Baseline
-I established two critical baselines:
-*   **Naive Persistence**: The simplest possible assumption: whatever the AQI is now, it will remain exactly the same for the next 72 hours (`y_hat_{t+h} = y_t`). This model has zero trainable parameters.
-*   **Ridge Regression**: Using scikit-learn's `MultiOutputRegressor` wrapped around `Ridge(alpha=1.0)`. This instantiated 72 independent linear regressors. The outputs were clamped to [0, 500].
+### 6.1 Phase 8: Ridge Regression vs Naive Persistence Baseline
+Two foundational baselines were established:
+*   **Naive Persistence**: Assumes AQI remains unchanged across all 72 horizons ($\hat{y}_{t+h} = y_t$). Zero trainable parameters.
+*   **Ridge Regression (Ridge v1)**: `MultiOutputRegressor(Ridge(alpha=1.0))` wrapping 72 independent linear regressors on the initial 64 pollutant features.
 
-Using the initial 64-feature set (Ridge v1), the Ridge model achieved an RMSE of 82.97 and an R² of 0.3741. The Naive Persistence model yielded an RMSE of 85.35 and an R² of 0.3499. The linear model comfortably beat the naive assumption. (See `06_model_training_ridge.ipynb`).
+Ridge v1 achieved an aggregate RMSE of 82.97 ($R^2 = 0.3741$), outperforming Naive Persistence (RMSE 85.35, $R^2 = 0.3499$). (Documented in `06_model_training_ridge.ipynb`).
 
-### 6.2 Phase 9: Random Forest
-Seeking to capture non-linear relationships, I trained a `RandomForestRegressor` with 100 estimators. The results were highly informative: the Random Forest achieved an RMSE of 89.18 and an R² of 0.2768. This performance was demonstrably worse than both the Ridge model and the zero-parameter Naive baseline. The tree-based ensemble was severely overfitting to the specific temporal distribution of the training set and failing to generalize. (See `07_model_training_rf.ipynb`).
+### 6.2 Phase 9: Random Forest Regressor
+A `RandomForestRegressor` (100 estimators) on 64 features achieved an aggregate RMSE of 89.18 ($R^2 = 0.2768$), performing substantially worse than both Ridge v1 and the parameter-free persistence baseline. The unconstrained tree ensemble overfit the training distribution and failed to generalize across multi-day forecast horizons. (Documented in `07_model_training_rf.ipynb`).
 
-### 6.3 Phase 10: TensorFlow DNN
-I then designed a Deep Neural Network architecture:
-`Input(n) -> Dense(128, ReLU) + Dropout(0.3) -> Dense(64, ReLU) + Dropout(0.2) -> Dense(32, ReLU) -> Dense(72, Linear)`
-The network was optimized using Adam and MSE loss, with `EarlyStopping` (patience=10, restoring best weights) and `ReduceLROnPlateau` (factor=0.5). To maintain strict chronological integrity, a chronological tail (the final 15% of `X_train`) was reserved for validation; the true test set remained completely isolated. 
-The DNN achieved an RMSE of 85.01 and an R² of 0.3429. While a marginal improvement over Naive Persistence, it still underperformed the simple Ridge linear model. (See `08_model_training_tf.ipynb`).
+### 6.3 Phase 10: Deep Neural Network (TensorFlow)
+A feed-forward deep neural network was evaluated:
+$$\text{Input}(64) \to \text{Dense}(128, \text{ReLU}) + \text{Dropout}(0.3) \to \text{Dense}(64, \text{ReLU}) + \text{Dropout}(0.2) \to \text{Dense}(32, \text{ReLU}) \to \text{Dense}(72, \text{Linear})$$
 
-### 6.4 Phase 10.5A: Diagnostics
-To understand why complex models were failing to generalize, I conducted deep diagnostic analysis. I analyzed distribution shifts between train and test sets by comparing median, 90th, and 99th percentiles, quantified by Wasserstein distance. Crucially, I segmented model performance by season (Winter Smog, Pre-Winter, Spring/Summer, Monsoon) and by AQI severity tiers, which isolated the most catastrophic errors (the top 1%) predominantly to the severe winter smog episodes. (See `09_error_and_distribution_diagnostics.ipynb`).
+Trained using Adam, MSE loss, `EarlyStopping` (patience=10), and `ReduceLROnPlateau` on a chronological validation tail. The DNN achieved an aggregate RMSE of 85.01 ($R^2 = 0.3429$). While marginally beating persistence, it did not match simple Ridge Regression. (Documented in `08_model_training_tf.ipynb`).
+
+### 6.4 Phase 10.5A: Error & Distribution Diagnostics
+Diagnostics analyzed train/test distribution shifts via Wasserstein distances and seasonal segmentation. Severe errors were heavily concentrated in the winter smog regime (November–February), where temperature inversions trap surface pollutants. (Documented in `09_error_and_distribution_diagnostics.ipynb`).
 
 ### 6.5 Phase 10.5B: Weather Enrichment
-The diagnostics strongly indicated that the intrinsic pollutant history was insufficient. By integrating the Open-Meteo features, the feature count expanded from 64 to 114. Retraining the Ridge model on this expanded dataset (Ridge v2 / EXP-005) resulted in a massive leap in performance: RMSE dropped to 78.38, and R² climbed to 0.4518. Meteorology was the missing link. (See `10_weather_enrichment.ipynb`).
+Adding meteorological covariates expanded the feature space to 114 canonical columns. Retraining Ridge on this weather-enriched dataset (Ridge v2 / EXP-005) reduced aggregate RMSE to **78.38** and raised $R^2$ to **0.4518**, demonstrating that meteorological physics provided critical predictive signal. (Documented in `10_weather_enrichment.ipynb`).
 
 ### 6.6 Phase 10.5C: Systematic Tuning & Experiment Registry
-With weather data integrated, I formalized an experiment registry to track iterations from EXP-001 through EXP-019. Model evaluation utilized an expanding-window 3-fold chronological cross-validation procedure, executed solely on the training partition.
-*   **EXP-001 to EXP-009**: Grid search over Ridge alpha values (1e-4 to 1e4).
-*   **EXP-010 to EXP-012**: ElasticNet regularization variations.
-*   **EXP-013**: LightGBM employing a direct multi-output strategy (72 distinct models).
-*   **EXP-014**: LightGBM utilizing a horizon-as-feature reformulation.
-(See `11_systematic_model_tuning.ipynb`).
+An experiment registry tracked systematic tuning iterations (EXP-001 to EXP-014) evaluated via 3-fold chronological cross-validation:
+*   **EXP-001 to EXP-009**: Grid search across Ridge $\alpha \in [10^{-4}, 10^4]$.
+*   **EXP-010 to EXP-012**: ElasticNet L1/L2 penalty sweeps.
+*   **EXP-013 & EXP-014**: LightGBM direct multi-output and horizon-as-feature formulations.
+(Documented in `11_systematic_model_tuning.ipynb`).
 
-### 6.7 Phase 10.5D: Architecture Experiments
-Recognizing that different forecast horizons exhibit different statistical behaviors, I explored hybrid architectures:
-*   **EXP-015**: Multi-Pollutant Ridge (predicting 6 raw pollutant concentrations and applying the EPA piecewise function post-hoc).
-*   **EXP-016**: Grouped Horizon Ridge, utilizing separate feature sets for h1-6, h7-24, and h25-72.
-*   **EXP-017**: Hybrid AQI Specialist, utilizing LightGBM for short horizons (h1-6) and Ridge for the remainder (h7-72).
+### 6.7 Phase 10.5D: Forecasting Architecture Experiments
+Horizon-specific behavioral analysis led to hybrid architectures:
+*   **EXP-015**: Multi-Pollutant Ridge (predicting 6 pollutants independently, applying EPA formula post-hoc).
+*   **EXP-016**: Grouped Horizon Ridge (specialized feature subsets across $h1..6$, $h7..24$, $h25..72$).
+*   **EXP-017**: Hybrid Specialist (LightGBM on $h1..6$, Ridge on $h7..72$).
 *   **EXP-018**: Hybrid Multi-Pollutant Specialist.
-*   **EXP-019**: Persistence-Aware Hybrid. This architecture emerged as the champion.
-(See `12_forecasting_architecture_experiments.ipynb`).
+*   **EXP-019**: Persistence-Aware Hybrid Model (combining LightGBM, Ridge, and long-horizon persistence blending). EXP-019 emerged as the champion.
+(Documented in `12_forecasting_architecture_experiments.ipynb`).
 
-## 7. Champion Model — EXP-019
+---
 
-The system's final champion is `EXP-019`, implemented as the `PersistenceAwareHybridModel`. It divides the 72-hour horizon into three distinct strategic zones:
-1.  **Short Horizon (h=1..6)**: Driven by LightGBM Direct Multi-Output (40 estimators, lr=0.1, num_leaves=20). Gradient boosting effectively captures non-linear, immediate-term patterns and interactions.
-2.  **Medium Horizon (h=7..37)**: Driven by Ridge Regression (alpha=1.0). Regularized linear models provide stable, un-overfitted predictions for the mid-range.
-3.  **Long Horizon (h=38..72)**: Driven by a blended approach: `y_hat_h = w_h * y_Ridge_h + (1 - w_h) * y_current`. The blend weights (`w_h`) decay linearly using `np.linspace(1.0, min_blend_weight, 35)`.
+## 7. Production Champion Model — EXP-019
 
-While the source class constructor sets a default `min_blend_weight=0.6`, the frozen EXP-019 production champion was validated and serialized with `min_blend_weight=0.7` (with blend weights decaying from 1.0 at h38 to 0.7 at h72). To ensure exact reproducibility across environments, the serialized production artifact directly stores its fitted `min_blend_weight=0.7` attribute. The class's `load()` method relies on this serialized value to dynamically reconstruct the precise `blend_weights` array ($w_{38}=1.0 \to w_{72}=0.7$). The model accesses the current AQI via index 9 (`epa_aqi_lag_1h` in the canonical schema).
+The production champion is **EXP-019**, implemented in `src/models/hybrid_specialist_model.py` as `PersistenceAwareHybridModel`. It partitions the 72-hour horizon into three strategic zones:
 
-**Rationale**: Short horizons require the flexibility of tree-based methods to capture rapid local dynamics. Medium horizons are best served by linear regression to suppress variance. At long horizons (days 2 and 3), predictive uncertainty grows dramatically; mathematically anchoring the forecast back toward the most recently observed true value acts as a powerful regularizer against extreme divergence.
+```text
+EXP-019 Horizon Partitioning:
+┌───────────────────────────────────────┬───────────────────────────────────────┬───────────────────────────────────────┐
+│       Zone 1: Short Horizon           │        Zone 2: Medium Horizon         │        Zone 3: Long Horizon           │
+│              (h = 1..6)               │             (h = 7..37)               │             (h = 38..72)              │
+├───────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────┤
+│ LightGBM Direct Multi-Output          │ Ridge Regression (alpha = 1.0)        │ Smooth Blended Ridge + Persistence    │
+│ 6 independent GBDT regressors         │ 31 linear multi-output regressors     │ y_hat = w_h * y_Ridge + (1-w_h)*y_obs │
+│ Captures non-linear local transitions │ Suppresses variance in mid-range      │ w_h linearly decays 1.0 -> 0.7        │
+└───────────────────────────────────────┴───────────────────────────────────────┴───────────────────────────────────────┘
+```
+
+1.  **Short Horizon ($h=1..6$)**: LightGBM Direct Multi-Output (40 estimators, learning rate 0.1, max depth 4, 20 leaves). Tree-based gradient boosting captures non-linear diurnal shifts and rapid pollutant transitions.
+2.  **Medium Horizon ($h=7..37$)**: Ridge Regression ($\alpha=1.0$). Regularized linear models suppress variance and maintain stability across day-ahead horizons.
+3.  **Long Horizon ($h=38..72$)**: Blended Ridge and Persistence:
+    $$\hat{y}_{t+h} = w_h \cdot \hat{y}_{\text{Ridge}, h} + (1 - w_h) \cdot y_{\text{current}}$$
+    The blend weights $w_h$ decay linearly across the 35 long horizons:
+    $$w_h = \text{linspace}(1.0, 0.7, 35) \quad \text{for } h = 38, \dots, 72$$
+
+### Serialized Production Asset Configuration
+While the Python class constructor default is `min_blend_weight=0.6`, the frozen EXP-019 production champion was trained, validated, and serialized with `min_blend_weight=0.7`. The serialized artifact stores its fitted parameters directly, and the class `load()` method dynamically reconstructs the exact weight array ($w_{38}=1.0 \to w_{72}=0.7$).
+
+### Current AQI Contract Alignment
+The production inference pipeline explicitly distinguishes:
+*   `epa_aqi`: The observed AQI at current observation timestamp $T$.
+*   `epa_aqi_lag_1h`: The historical observation at $T-1\text{h}$.
+
+Both `AQIPredictor` and `SHAPExplainer` utilize the exact same observed current AQI (`epa_aqi`) for long-horizon persistence blending and explainability decompositions.
+
+---
 
 ## 8. Final Test Benchmark (Phase 10.5E)
 
-I evaluated 7 frozen, finalized models against the strict 9,311-sample held-out test partition (2025-06-07 to 2026-08-28 UTC).
+Seven finalized models were evaluated on the strict 9,311-sample held-out test partition (2025-06-07 to 2026-08-28 UTC):
 
-| Rank | Model | Features | RMSE | MAE | R² | h+1 RMSE | h+72 RMSE |
-|------|-------|----------|------|-----|----|---------|---------|
-| 1 | EXP-019 Persistence-Aware Hybrid | 114 | 75.91 | 53.55 | 0.4858 | 50.43 | 77.43 |
-| 2 | EXP-017 Hybrid Specialist | 114 | 78.20 | 55.98 | 0.4543 | 50.43 | 84.53 |
-| 3 | Ridge v2 Weather-Enriched | 114 | 78.38 | 56.17 | 0.4518 | 54.41 | 84.53 |
-| 4 | Ridge v1 Pollutants-only | 64 | 82.97 | 63.14 | 0.3741 | 53.18 | 96.57 |
-| 5 | TensorFlow DNN v1 | 64 | 85.01 | 65.94 | 0.3429 | 55.59 | 102.26 |
-| 6 | Naive Persistence | 1 | 85.35 | 46.64 | 0.3499 | 68.95 | 89.68 |
-| 7 | Random Forest v1 | 64 | 89.18 | 65.06 | 0.2768 | 54.28 | 99.64 |
+| Rank | Model | Model ID | Features | RMSE | MAE | $R^2$ | h+1 RMSE | h+72 RMSE |
+| :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1** | **Persistence-Aware Hybrid** | **EXP-019** | **114** | **75.91** | **53.55** | **0.4858** | **50.43** | **77.43** |
+| 2 | Hybrid Specialist | EXP-017 | 114 | 78.20 | 55.98 | 0.4543 | 50.43 | 84.53 |
+| 3 | Ridge v2 (Weather-Enriched) | EXP-005 | 114 | 78.38 | 56.17 | 0.4518 | 54.41 | 84.53 |
+| 4 | Ridge v1 (Pollutants-Only) | — | 64 | 82.97 | 63.14 | 0.3741 | 53.18 | 96.57 |
+| 5 | TensorFlow DNN v1 | — | 64 | 85.01 | 65.94 | 0.3429 | 55.59 | 102.26 |
+| 6 | Naive Persistence Baseline | — | 1 | 85.35 | 46.64 | 0.3499 | 68.95 | 89.68 |
+| 7 | Random Forest Regressor | — | 64 | 89.18 | 65.06 | 0.2768 | 54.28 | 99.64 |
 
-EXP-019 demonstrated decisive superiority across the aggregate RMSE and particularly at the outer limit (h+72). (See `13_final_test_benchmark.ipynb`).
+EXP-019 achieved the lowest aggregate RMSE (75.91), the highest $R^2$ (0.4858), and the strongest 72-hour horizon accuracy (77.43 vs 89.68 persistence). EXP-019 also demonstrated robust extreme-event tracking with an authoritative Hazardous (>300 AQI) subset RMSE of **142.65** on this partition. (Documented in `13_final_test_benchmark.ipynb`).
+
+---
 
 ## 9. Walk-Forward Validation (Phase 11)
 
-To ensure the model wasn't simply tuned to one specific temporal split, I subjected it to rigorous walk-forward validation across 4 temporally embargoed folds. Each fold maintained the strict >72h gap between training and validation data. All preprocessing (including the scaler) and model weights were refit entirely from scratch for every single fold.
+To evaluate temporal generalization, EXP-019 was tested across 4 temporally embargoed walk-forward folds. Each fold maintained a $>72\text{h}$ embargo gap between training and validation data. Preprocessing scalers and model weights were refitted from scratch on each fold:
 
-I utilized a custom `LahoreSeasonClassifier` mapping months to prevailing climatology:
-*   `winter_smog`: Nov, Dec, Jan, Feb
-*   `transition`: Mar, Apr, Oct
-*   `summer`: May, Jun
-*   `monsoon`: Jul, Aug, Sep
+| Fold | Climatological Regime | Validation Period | Validation Samples | EXP-019 RMSE | EXP-017 RMSE | Ridge v2 RMSE | Naive Persistence RMSE | EXP-019 $R^2$ |
+| :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **F1** | Winter / Smog 2021 | Nov 2021 – Feb 2022 | 2,159 | **104.23** | 102.76 | 103.08 | 139.04 | 0.1567 |
+| **F2** | Transition + Summer 2022 | Mar 2022 – Jun 2022 | 2,183 | **72.43** | 72.67 | 72.95 | 94.28 | 0.1403 |
+| **F3** | Monsoon 2022 | Jul 2022 – Sep 2022 | 2,135 | **71.88** | 71.15 | 71.42 | 96.03 | 0.1715 |
+| **F4** | Winter / Smog 2023 | Nov 2023 – Feb 2024 | 2,159 | **85.21** | 85.47 | 85.79 | 112.49 | 0.3813 |
 
-| Fold | Season | Samples | EXP-019 | EXP-017 | Ridge v2 | Naive | EXP-019 R² |
-|------|--------|---------|---------|---------|----------|-------|-----------|
-| F1 | Winter/Smog 2021 | 2,159 | 104.23 | 102.76 | 103.08 | 139.04 | 0.1567 |
-| F2 | Transition+Summer 2022 | 2,183 | 72.43 | 72.67 | 72.95 | 94.28 | 0.1403 |
-| F3 | Monsoon 2022 | 2,135 | 71.88 | 71.15 | 71.42 | 96.03 | 0.1715 |
-| F4 | Winter/Smog 2023 | 2,159 | 85.21 | 85.47 | 85.79 | 112.49 | 0.3813 |
+### Walk-Forward Findings & Scientific Calibration
+*   **Consistent Advantage**: EXP-019 achieved a mean RMSE of **83.44** versus Naive Persistence's **110.46**, representing a **24.46% relative improvement** and winning 4 out of 4 folds.
+*   **Regime-Dependent Error**: EXP-019 consistently outperformed persistence across all four walk-forward folds, although absolute error varied materially across temporal regimes, with winter/smog periods remaining substantially more difficult (RMSE 85–104) than summer and monsoon periods (RMSE 71–72).
+*   **Error Dispersion**: Across the four folds ($[104.23, 72.43, 71.88, 85.21]$), the population standard deviation is approximately **13.14** (sample standard deviation 15.17), reflecting real seasonal variance across distinct atmospheric regimes.
+(Documented in `14_walk_forward_stability.ipynb`).
 
-**Analysis**:
-*   EXP-019 achieved a mean RMSE of 83.44 vs Naive's 110.46, representing a massive 24.5% relative gain.
-*   EXP-019 outperformed the naive baseline in all 4 out of 4 folds, with a worst-case margin of +21.8 RMSE points.
-*   The fold standard deviation was tight at 4.9, proving the performance margin is structurally sound and not regime-dependent.
-*   Crucially, this diagnostic confirmed the core challenge: the Winter/Smog regime is vastly harder to predict (RMSE 85-104) compared to the stable Summer/Monsoon seasons (RMSE 71-72).
-(See `14_walk_forward_stability.ipynb`).
+---
 
-## 10. Winter/Smog Ablation (Phase 11.5)
+## 10. Winter/Smog Feature Ablation (Phase 11.5)
 
-To address the high error rates in winter folds, I tested the 4 candidate feature families outlined in Section 4.4. I kept the EXP-019 architecture completely frozen and evaluated 6 configurations (ABL-000 baseline through ABL-005 all families) across all 4 walk-forward folds.
+To test whether engineered surface features could alleviate winter errors, four candidate feature families were evaluated across all 4 walk-forward folds with EXP-019 model architecture held fixed:
 
-Adoption gates were strict: the new features required demonstrated winter improvement, no overall regression >2.0, no summer/monsoon regression >3.0, no specific horizon group regression >5.0, no extreme event regression, and the model must maintain a >15.0 RMSE advantage over the naive baseline.
+| Configuration | Description | Total Features | F1 RMSE | F2 RMSE | F3 RMSE | F4 RMSE | Mean RMSE |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **ABL-000** | **Baseline (EXP-019)** | **114 (113 predictors)** | **104.23** | **72.43** | **71.88** | **85.21** | **83.44** |
+| ABL-001 | + Thermal / Inversion Proxy | 117 | 104.38 | 72.29 | 71.81 | 85.20 | 83.42 |
+| ABL-002 | + Fog / Mist Indicator | 116 | 104.30 | 72.40 | 71.84 | 84.94 | 83.37 |
+| ABL-003 | + Stagnation Enhancement | 117 | 104.24 | 72.78 | 72.24 | 85.37 | 83.66 |
+| ABL-004 | + Seasonal Emission Proxy | 116 | 103.86 | 72.40 | 71.75 | 85.31 | 83.33 |
+| ABL-005 | + All 4 Feature Families | 124 | 104.28 | 72.55 | 72.00 | 85.16 | 83.50 |
 
-| Ablation | Description | F1 | F2 | F3 | F4 | Mean RMSE |
-|----------|-------------|-----|-----|-----|-----|-----------|
-| ABL-000 | Baseline (113 predictors) | 104.23 | 72.43 | 71.88 | 85.21 | 83.44 |
-| ABL-001 | + Thermal/Inversion Proxy | 104.38 | 72.29 | 71.81 | 85.20 | 83.42 |
-| ABL-002 | + Fog/Mist Indicator | 104.30 | 72.40 | 71.84 | 84.94 | 83.37 |
-| ABL-003 | + Stagnation Enhancement | 104.24 | 72.78 | 72.24 | 85.37 | 83.66 |
-| ABL-004 | + Seasonal Emission Proxy | 103.86 | 72.40 | 71.75 | 85.31 | 83.33 |
-| ABL-005 | + All 4 Families | 104.28 | 72.55 | 72.00 | 85.16 | 83.50 |
+### Scientific Conclusion
+The spread of mean RMSE across all 6 ablation configurations was only **0.33 points** ($83.33$ to $83.66$), with a best improvement of just **0.11 RMSE points** over baseline. None of the candidate feature sets met the adoption threshold. The original 114-column EXP-019 feature set was retained.
 
-**Conclusion**: The full spread of mean RMSE across all ablations was barely 0.33 points (83.33 to 83.66), with a maximum observed improvement of just 0.11 RMSE points. Consequently, none of the ablation features were adopted, and the original EXP-019 feature set was retained. This yielded a key scientific finding: simple surface-level meteorological proxies are near their predictive limit for this specific problem; they fundamentally cannot represent vertical atmospheric phenomena (like Planetary Boundary Layer height or specific inversion lapse rates) or real-time stochastic emission shocks (like agricultural fire counts).
-(See `15_winter_smog_ablation.ipynb`).
+This established that the tested surface-level proxy families produced negligible improvement under this experiment, suggesting that richer vertical atmospheric profiles (such as Planetary Boundary Layer height and vertical temperature lapse rates) and satellite-derived emission telemetry may be necessary for additional performance gains. (Documented in `15_winter_smog_ablation.ipynb`).
+
+---
 
 ## 11. Inference Pipeline (Phase 12)
 
-The inference architecture was designed for robustness and safety in production.
-*   **ModelLoader**: Provides thread-safe, lazy instantiation of the model, the feature scaler (which strictly validates `n_features_in_ == 114`), and the schema specification (which ensures exactly 114 features are presented in the correct order).
-*   **AQIPostProcessor**: Handles translation of raw AQI predictions into EPA categories, hex colors, and severity flags (e.g., >200 triggers 'high', >300 triggers 'hazardous'). It also calculates the empirical prediction error intervals.
-    *   **Empirical Intervals**: These bands are derived from 8,636 out-of-fold residuals calculated during the walk-forward validation process. For each horizon *h*, the lower bound is `L_h = max(0, aqi + Q_0.10(e_h))` and the upper bound is `U_h = max(0, aqi + Q_0.90(e_h))`. I must stress: these are empirical residual quantile ranges, NOT parametric statistical confidence intervals.
-*   **PredictionCache**: Implemented a file-based JSON caching layer with a 1-hour TTL to prevent redundant computation.
-*   **AQIPredictor**: Orchestrates the process. Crucially, it manages timestamp semantics:
-    *   `input_observed_at`: The physical time the data was measured.
+The inference pipeline (`src/inference/`) provides deterministic, leak-safe forecasting in production:
+
+*   **`ModelLoader`**: Provides thread-safe instantiation of the model, feature scaler, and schema. Validates `n_features_in_ == 114`.
+*   **`AQIPostProcessor`**: Maps float AQI predictions to EPA categories, colors, and severity ranks. Derives **empirical prediction error intervals** from 8,636 out-of-fold residuals from walk-forward validation:
+    $$L_h = \max(0, \hat{y}_h + Q_{0.10}(e_h)), \quad U_h = \max(0, \hat{y}_h + Q_{0.90}(e_h))$$
+    These are empirical residual quantile intervals, explicitly distinguished from parametric statistical confidence bounds. Extreme predictions and upper bounds above 500 are preserved numerically and categorized as Hazardous.
+*   **`PredictionCache`**: File-based caching layer with TTL expiration (default: 1 hour).
+*   **`AQIPredictor`**: Manages forecasting workflow and timestamp semantics:
+    *   `input_observed_at`: Physical measurement timestamp $T$.
     *   `forecast_origin`: Anchored strictly to `input_observed_at`.
-    *   `generated_at`: The system time the API processed the request.
-    *   It implements staleness detection (flagging inputs older than 3 hours) and deliberately does *not* artificially clip upper-bound predictions at 500, preserving the model's unconstrained view of extreme events.
+    *   `generated_at`: System time when prediction was computed.
+    *   Staleness tracking: Flags inputs older than 3 hours (`is_stale=true`).
+
+---
 
 ## 12. REST API (Phase 13)
 
-The serving layer is a Flask application structured using the Blueprint pattern. It exposes five primary endpoints:
-*   `/api/health`: Service liveness verification.
-*   `/api/current`: Retrieves the latest observed state.
-*   `/api/forecast`: Generates the 72-hour prediction array.
-*   `/api/model/info`: Exposes metadata about the currently loaded champion model.
-*   `/api/explain`: Provides SHAP-based attribution arrays.
+The serving layer is a Flask WSGI application structured using the Blueprint pattern (`src/api/`):
 
-CORS was configured to accept specific origins, defaulting to `localhost:8501` for dashboard integration. I implemented robust HTTP error handling (400, 404, 503, 500). A critical security requirement was ensuring 500-level errors returned sanitized JSON payloads that never leaked internal filesystem paths or Python tracebacks to the client.
+### Endpoints
+*   **`GET /api/health`**: Service health, loaded model ID (`EXP-019`), and feature source status (`hopsworks` / `bootstrap`).
+*   **`GET /api/current`**: Latest observed telemetry, calculated AQI, dominant pollutant, and current alert status.
+*   **`GET /api/forecast`**: 72-hour forecast sequence, empirical prediction error intervals, and multi-horizon alert summary.
+*   **`GET /api/model/info`**: Model architecture, training metadata, and benchmark metrics.
+*   **`GET /api/explain?horizon=H`**: Horizon-specific SHAP attribution vectors, feature contributions, and base values.
 
-## 13. Dashboard (Phase 14)
+### Observation Resolver Architecture
+`ObservationResolver` (`src/inference/observation_resolver.py`) implements a resilient observation hierarchy:
+1.  **`auto` Mode (Default)**: Attempts live point query from Hopsworks RonDB online feature store (`aqi_weather_features_v2` v1). If online query fails or Hopsworks is unreachable, falls back gracefully to committed bootstrap vector with `is_stale=true`.
+2.  **`hopsworks` Mode**: Queries only Hopsworks online store; fails closed if unavailable.
+3.  **`bootstrap` Mode**: Uses committed local bootstrap vector (`data/runtime/bootstrap/latest_feature_vector.json`).
 
-The user interface was constructed using Streamlit and Plotly. Key components include:
-*   A data freshness banner warning of stale ingestion.
-*   A "Current Observation" summary card.
-*   An interactive 72-hour forecast chart displaying the primary prediction line alongside the empirical error bands. These bands are explicitly labeled "Empirical prediction error interval"—they are never misrepresented as "confidence intervals."
-*   Milestone cards detailing specific threshold crossings.
-*   A SHAP attribution explorer for model transparency.
-*   Under the hood, the `DashboardDataClient` communicates with the Flask API but implements an automatic local inference fallback mechanism if the REST service is unresponsive.
+The resolver strictly validates the 114-column canonical schema order, integral Unix timestamp `dt`, finite numeric values, and calculates the current observed AQI.
 
-## 14. CI/CD and Automation (Phase 15)
+---
 
-This phase directly leveraged the preparation work completed in the first week. I established three distinct GitHub Actions workflows to govern the repository:
+## 13. Streamlit Dashboard (Phase 14)
 
-1.  **Continuous Integration (`ci.yml`)**: Triggered on push or PR to the `main` branch. It sets up Python 3.10, executes the `pytest` suite enforcing `--cov-fail-under=70`, and uploads both JUnit XML results and coverage reports as workflow artifacts with a 14-day retention policy.
-2.  **Feature Pipeline (`feature_pipeline.yml`)**: A cron-driven job scheduled at `17 * * * *` (the 17th minute of every hour). It executes `src.feature_pipeline.run_hourly_ingestion`. It supports a `dry_run` input parameter for manual testing and uploads a telemetry snapshot artifact retained for 7 days.
-3.  **Training Pipeline (`training_pipeline.yml`)**: A daily cron job executing at `45 2 * * *` (Daily at 02:45 UTC, providing a 28-minute buffer after hourly feature ingestion at minute 17). It orchestrates candidate model training and evaluation directly against authoritative historical data in the Hopsworks offline Feature Store, enforcing strict chronological embargoes, physical timestamp targets, and production champion immutability (validating the SHA256 hash before and after execution to guarantee zero silent overwrites).
-
-Because GitHub Actions runners are ephemeral, pipeline outputs and logs are explicitly saved as GitHub Actions artifacts. The fundamental understanding of runner lifecycles and secret management gained from the Discord resources made implementing these workflows straightforward.
-
-## 15. Hopsworks Integration (Phase 16)
-
-To elevate the system architecture to MLOps standards, I integrated Hopsworks as a cloud feature store and model registry layer.
-*   **Feature Group Architecture**: Created and populated production feature group `aqi_weather_features_v2` (version 1, ID `52526`) on project `aqi_predictor_by_Waleed` (`https://eu-west.cloud.hopsworks.ai`). Configured `primary_key=["location_id"]`, `event_time="dt"`, `online_enabled=True`, and `time_travel_format="HUDI"`.
-*   **Offline Storage**: Ingested 48,718 historical hourly observations (spanning 2020-11-28 13:00:00 UTC through 2026-09-07 21:00:00 UTC for Lahore) across 115 columns (`location_id` + 114 canonical features). Idempotency is verified: re-inserting historical records maintains row count without inflation.
-*   **Scheduled Hourly Live Feature Pipeline**: Configured to run automatically every hour via GitHub Actions (`.github/workflows/feature_pipeline.yml`, cron schedule `17 * * * *`). The exact live production workflow path has been successfully verified through `workflow_dispatch` in workflow run [34152458548](https://github.com/hwaleedkhalid/aqi-forecasting-system/actions/runs/34152458548), completing in 43 seconds.
-    *   *Mathematical Lookback Necessity*: EXP-019 requires 114 canonical model inputs: 25 pollutant lags, 20 weather lags, 34 rolling aggregates, 6 differentials, 5 chemical interaction ratios, 7 cyclical/calendar signals, 9 base pollutants + AQI, 7 base meteorology, and 1 `dt`. A single instantaneous API reading at time $t$ cannot construct 24-hour backward lag and rolling windows. The pipeline therefore mandates a continuous $[T-24\text{h}, T]$ historical lookback context.
-    *   *Dual Telemetry Providers*: Combines OpenWeather Air Pollution History API (`fetch_historical_air_quality` retrieving 72 hours of hourly criteria pollutants: CO, NO, NO₂, O₃, SO₂, PM2.5, PM10, NH₃) with Open-Meteo Weather API (`past_days=3, forecast_days=1` retrieving hourly temperature, humidity, surface pressure, wind speed, wind direction, and precipitation).
-    *   *Hourly Grid Continuity & Dropout Toleration*: Reindexes both series to an exact 1-hour UTC frequency grid. Adheres strictly to the established production preprocessing contract: short sensor dropouts $\le 3$ hours are linearly/time interpolated, while unbridgeable gaps $> 3$ hours or missing $T-24\text{h}$ boundaries fail closed with `ValidationError`.
-    *   *Explicit Production Timestamp $T$*: Derived as $T = \min(T_{\text{AQ}}, T_{\text{weather}})$ floored to the hour boundary ($T \pmod{3600} == 0$), strictly $\le \text{now\_utc}$. Future forecast hours from Open-Meteo are discarded so future timestamps never become the observation origin.
-    *   *Authoritative Current AQI*: Computed via standard US EPA piecewise linear interpolation (`calculate_overall_aqi`), cleanly distinguishing current observation $T$ (`epa_aqi=131`) from $T-1\text{h}$ lag (`epa_aqi_lag_1h=128`).
-    *   *Dual-Store Ingestion Semantics & Asynchronous Materialization*: Historical event is ingested with streaming Kafka writes to online RonDB using server-side `upsert_if_newer=True` (synchronous, completing in ~2 seconds), while offline Hudi materialization is triggered asynchronously (`wait_for_job=False`), preventing GitHub Actions runner timeouts.
-    *   *Automated Orchestration & Security*: Scheduled via GitHub Actions (`.github/workflows/feature_pipeline.yml`) on cron `17 * * * *` with encrypted repository secrets (`OPENWEATHER_API_KEY`, `HOPSWORKS_API_KEY`, `HOPSWORKS_PROJECT`), concurrency control (`cancel-in-progress: false`), least privilege permissions (`contents: read`), fail-fast secret validation, and structured snapshot export to `data/snapshots/latest_ingestion_report.json`. Dependency isolation is guaranteed via `requirements-feature-pipeline.txt` (`hopsworks[python]==5.0.6` with `confluent-kafka` and `pyarrow`), preserving the clean deployment footprint of Render and Streamlit.
-    *   *Live Cloud State Verified*: Queried live Hopsworks RonDB online store, verifying latest observation $T = 1788804000$ (2026-09-07 18:00:00 UTC), EPA AQI 131.0, 114 features in exact canonical schema order, and `cloud_active: true`.
-*   **Model Registry (Live Champion Registration)**: 
-    *   *Rationale for Initial Decoupling*: The Model Registry connector was originally maintained in an integration-ready state to decouple the live production deployment on Render and Streamlit from external cloud availability, authentication latencies, and cold-start download overheads.
-    *   *Live Registration*: Successfully registered the frozen EXP-019 production champion under the canonical identity `pearls_aqi_production_champion` (version 1, ID `pearls_aqi_production_champion_1`) in the live Hopsworks Model Registry (`aqi_predictor_by_Waleed`).
-    *   *Bundle Integrity & Assets*: Packaged the complete runtime bundle comprising `production_hybrid_model.joblib` (SHA256 `f51d2eff53b8...`), `feature_scaler_v2_weather.joblib` (SHA256 `9ce7e9fcc4fe...`), `feature_schema_v2_weather.json` (SHA256 `38a5fdea89b0...`), `empirical_error_intervals.json` (SHA256 `dba4571ebe05...`), and companion explainability assets (`shap_background.npy`, `global_shap_importance.json`, `explainer_manifest.json`) alongside an LF-normalized `manifest.json`.
-    *   *SDK & Schema Binding*: Constructed the 114-input / 72-output `ModelSchema` using the Hopsworks 5.0.6 `hsml` API and bound verified benchmarks explicitly distinguished by provenance: chronological out-of-time holdout test metrics (9,311 samples, 2025-06-07 to 2026-08-28 UTC: `overall_rmse: 75.91, overall_mae: 53.55, overall_r2: 0.4858, h1_rmse: 50.43, h72_rmse: 77.43`) alongside the 4-fold temporal walk-forward validation results (`mean_rmse: 83.44`, 4/4 fold wins vs persistence, 24.46% relative gain).
-    *   *Idempotency & Fail-Closed Protection*: Engineered safe re-run semantics that download and verify checksum parity on existing version 1 before skipping redundant registration, preventing unwanted version inflation (v2, v3). Mismatched existing versions fail closed with `ValidationError`.
-    *   *Clean-Download & Parity Verification*: Downloaded the registered champion into an isolated temporary environment, verified exact SHA256 equality, validated standalone loadability, and proved complete mathematical prediction parity (0.00000000 maximum absolute difference across all 72 horizons, with boundary check parity on h1, h6, h7, h24, h37, h38, h39, h72) and explainability parity on h1, h24, and h72 with exact numerical alignment between predictor and explainer (e.g. h72 unrounded 158.9892 rounding to 159.0 for both).
-    *   *Production Boundary*: Runtime deployment on Render and Streamlit continues to execute self-contained Git runtime assets, guaranteeing zero latency regressions while fulfilling full Model Registry reproducibility via `python -m src.inference.hopsworks_registry --all`.
-
-## 16. Explainability (Phase 17)
-
-To demystify model behavior, I implemented SHAP (SHapley Additive exPlanations) attribution mapped directly onto the exact architecture of the `PersistenceAwareHybridModel`. The implementation uses three distinct routing zones:
-1.  **h=1..6**: Evaluates individual LightGBM estimators using `TreeExplainer` via interventional perturbation.
-2.  **h=7..37**: Computes Interventional Linear SHAP on the Ridge weights: `phi_i = coef_i * (x_scaled_i - mean_bg_i)`.
-3.  **h=38..72**: Executes the exact mathematical blended decomposition: `base_value = w_h * b_specialist`, `phi_final = w_h * phi_unweighted`, and `persistence_component = (1-w_h) * y_current`.
-
-Global feature importance was defined as `I_i = (1/72) * sum over h of mean|phi_final_i,h|`, evaluated rigorously on a 500-sample seasonal stratified cohort. The SHAP background reference distribution utilized a separate, independent 100-sample set.
-I built in mathematical additivity validation to verify: `|sum(base + phis + persistence) - explained_output_preclip| < 1e-6`.
-The API reports attributions in scaled z-space (providing both raw and scaled values) and strictly uses labels like "increases_prediction" or "decreases_prediction" to avoid implying causality.
-
-## 17. Testing
-
-The codebase is protected by 418 individual automated tests spanning 33 test modules and a central `conftest.py`. Overall test coverage is 73.43%, with critical-path inference, model loading, and explainability modules achieving between 88% and 100% coverage. The CI pipeline enforces a strict 70% minimum coverage gate. The test suite comprehensively covers the API layer, model internals, data ingestion logic, feature engineering routines, training pipelines, inference paths, runtime asset integrity resolution, clean-clone bootstrap parity, dashboard logic, workflow scripts, Hopsworks integration and backfill audit rules, Model Registry bundle integrity and idempotency, the scheduled hourly live feature pipeline (with grid continuity and out-of-order protection verification), the daily Feature-Store-driven candidate training and evaluation pipeline, and the SHAP explainability engine. All tests run in isolated environments with external cloud dependencies 100% mocked, ensuring CI remains fast, reliable, and secret-independent.
-
-
-## 18. Challenges and Debugging
-
-Building this system involved significant debugging and navigating analytical challenges:
-
-*   **Model Complexity Paradox**: My initial assumption was that a complex model would easily outperform simpler methods. This was proven false rapidly. The Random Forest achieved a dismal RMSE of 89.18, losing outright to a naive baseline. Even the TensorFlow DNN (RMSE 85.01) could not match a basic Ridge Regression (RMSE 82.97). This reinforced the reality that regularized linear models are exceptionally powerful for tabular time-series data with relatively limited sample sizes.
-*   **Temporal Distribution Shift**: The composition of the training data differed markedly from the test data due to prevailing seasonal factors. Diagnosing this shift required stepping away from aggregate metrics and analyzing segment-specific performance, ultimately revealing that errors were heavily concentrated in the winter smog periods.
-*   **The Winter/Smog Crucible**: The walk-forward validation laid bare the difficulty of predicting extreme events. Fold 1 (Winter 2021) showed an RMSE of 104, while Summer folds sat comfortably at 71. The physical mechanics of smog formulation during winter inversions are simply harder to forecast using only surface-level data.
-*   **Feature Schema Misalignment**: I spent considerable time debugging the feature count definitions. The canonical schema is 114 features, which includes the `dt` (datetime) column. However, during model training and walk-forward validation, `dt` is strictly excluded as a predictor, leaving 113 functional features. Reconciling this definition across the inference pipeline, scaling transforms, and Hopsworks integration required careful refactoring.
-*   **Timestamp Semantics**: In early API iterations, I mistakenly anchored the `forecast_origin` to the time the API request was received (`generated_at`). This caused misalignment; the forecast origin must strictly match the timestamp of the last actual physical observation (`input_observed_at`).
-*   **Serialization State**: A subtle bug occurred in the Hybrid model loading. The constructor sets a default `min_blend_weight`. During serialization, the specific learned weight is saved. However, I realized the `load()` method had to explicitly extract this serialized `min_blend_weight` and dynamically reconstruct the full 35-step `blend_weights` array, rather than relying on the constructor default.
-*   **Dependency Management Hell**: Integrating SHAP proved surprisingly difficult due to underlying Python version constraints. SHAP version 0.50+ requires Python 3.11+, and 0.52+ requires Python 3.12+. Because my environment was Python 3.10, I had to identify and strictly pin the dependency to version `0.49.1` to maintain compatibility.
-*   **CI Ephemerality**: When initially writing the GitHub Actions workflows, I assumed files generated during a job step would persist indefinitely. Debugging failing pipelines taught me about ephemeral runners—if a report or model artifact is generated, it will vanish the moment the job concludes unless explicitly captured and uploaded using the `actions/upload-artifact` action.
-*   **Streaming Ingestion and Materialization Latency in CI**: When automating the live feature pipeline in GitHub Actions, Hopsworks feature groups with `online_enabled=True` operate as streaming Kafka feature groups requiring `confluent-kafka` and `pyarrow` (provided via `hopsworks[python]==5.0.6`). Furthermore, default synchronous insert calls block polling for cloud Spark materialization jobs, which can take 10-15 minutes or timeout. Setting `wait_for_job=False` / `wait=False` for offline storage ensures the Kafka online write completes synchronously in ~2 seconds while offline Hudi materialization runs asynchronously in the cloud, bringing total GitHub Actions workflow duration down to 43 seconds.
-
-## 19. Design Decisions
-
-Throughout the project, several core architectural choices defined the system's character:
-*   **Targeting EPA AQI**: Rather than just predicting raw ug/m3 concentrations, targeting the synthetic EPA AQI scale provided immediate, universally understood public health context.
-*   **72-Hour Horizon**: A 3-day forecast window was chosen as the optimal balance between predictive feasibility and providing enough lead time for municipal or personal health planning.
-*   **Chronological Split with Embargo**: Traditional randomized train/test splits destroy time-series integrity. The strict chronological split, coupled with a 72-hour embargo gap matching the forecast horizon, aggressively prevented temporal information leakage.
-*   **Ridge Baseline Superiority**: The selection of Ridge (alpha=1.0) was not arbitrary; it was derived from the systematic parameter grid sweeps executed in experiments EXP-001 through EXP-009.
-*   **Persistence Blending Architecture**: The decision to blend the outer horizons (h=38..72) back toward the current observation was driven by the reality of compounding uncertainty. In the absence of high-confidence predictions three days out, the most recently observed value acts as the safest, most stable anchor point.
-*   **Empirical Error vs Parametric CI**: I explicitly chose to report empirical residual ranges calculated from walk-forward holdout data rather than calculating standard parametric confidence intervals. Machine learning error distributions on environmental data are rarely Gaussian. Empirical residuals provide a more honest, battle-tested reflection of actual model behavior, and preventing the UI from labeling them "confidence intervals" maintains that honesty.
-*   **Rejecting Ablation Features**: The decision not to adopt the winter-specific features (despite a trivial 0.11 RMSE improvement) was rooted in software engineering pragmatism. The added code complexity, data dependencies, and testing surface area were not justified by a marginal statistical gain.
-*   **Observation-Anchored Forecating**: Tying the `forecast_origin` to the observation timestamp rather than system time ensures that forecasts are physically meaningful, regardless of network latency or API processing delays.
-
-## 20. Lessons Learned
-
-Executing this project end-to-end offered profound personal and professional insights. In the initial phase, I did not immediately begin implementation; I first reviewed the preparatory resources shared in the course Discord server. This dedicated review refreshed my understanding of Python project structuring and machine learning fundamentals, while solidifying strict Git and GitHub version control practices. Furthermore, GitHub Actions and CI/CD concepts were relatively new to me; studying workflow triggers, runner lifecycles, secrets management, and artifact persistence proved directly beneficial later in Phase 15 and during production deployment.
-
-First and foremost, the critical importance of robust baselines cannot be overstated. Watching my complex TensorFlow network and Random Forest ensemble lose outright to a simple Ridge regression (Ridge v1) was a humbling and clarifying moment. It taught me that complexity is not a proxy for capability.
-
-I also learned that data engineering often yields far higher returns than algorithm selection. The single largest leap in system performance came not from model tuning, but from integrating meteorology. Moving from 64 to 114 features by pulling Open-Meteo data drove the RMSE down from 82.97 to 78.38—a far larger gain than any architecture tweak provided.
-
-The implementation of the walk-forward validation framework was a watershed moment. It revealed that a single chronological train/test split can mask regime-specific failures. By splitting the evaluation temporally, I could clearly see that summer predictions were reliable, while winter smog episodes were severely stretching the model's capabilities. It showed me the limits of the data; the ablation study demonstrated that no amount of clever feature engineering on surface-level metrics could fully compensate for the lack of vertical atmospheric data.
-
-Finally, navigating the deployment journey taught me the value of operational discipline. Moving from local notebooks to a deployed system required rigorous dependency isolation, runtime artifact whitelisting, fail-closed integrity validation, continuous memory profiling, and cross-platform consistency. Building a system that strictly freezes production artifacts, rigorously tests candidates against held-out baselines, and reports empirical—rather than theoretical—errors fundamentally shifted my perspective from building standalone ML scripts to engineering reliable, production-grade ML systems.
-
-## 21. Future Work
-
-Several avenues exist for significant future enhancement:
-*   **AQICN Integration (Phase 18)**: Expanding the ingestion layer to pull multi-source data from the AQICN network to improve spatial robustness.
-*   **Vertical Atmospheric Profiling**: The ablation study strongly suggested that surface data is insufficient for severe winter inversion modeling. Incorporating planetary boundary layer (PBL) height and specific temperature lapse rates is a high priority.
-*   **Real-time Emission Dynamics**: Integrating active fire count data from satellite telemetry could provide crucial early warning signals for agricultural burning impacts.
-*   **Expanded Winter Histories**: The model simply needs to observe more winter smog seasons to learn the underlying dynamics better. Time will organically solve this data starvation issue.
-*   **Automated Champion Promotion**: Maturing the CI/CD pipeline to include fully automated, statistically gated model promotion rather than relying on manual registry updates.
-
-## 22. Complete List of Notebooks
-
-1.  `01_api_investigation.ipynb` — OpenWeather API validation & rate limits
-2.  `02_raw_data_exploration.ipynb` — Historical data ingestion validation
-3.  `03_eda_and_aqi_conversion.ipynb` — EDA and EPA AQI conversion
-4.  `04_feature_engineering.ipynb` — Temporal, lag, rolling features
-5.  `05_dataset_preparation.ipynb` — Multi-output target alignment & chronological split
-6.  `06_model_training_ridge.ipynb` — Ridge baseline training
-7.  `07_model_training_rf.ipynb` — Random Forest training
-8.  `08_model_training_tf.ipynb` — TensorFlow DNN training
-9.  `09_error_and_distribution_diagnostics.ipynb` — Distribution shift & error analysis
-10. `10_weather_enrichment.ipynb` — Open-Meteo feature extraction
-11. `11_systematic_model_tuning.ipynb` — Cross-validation & experiment tracking
-12. `12_forecasting_architecture_experiments.ipynb` — Hybrid architectures
-13. `13_final_test_benchmark.ipynb` — 7-model benchmark on held-out test
-14. `14_walk_forward_stability.ipynb` — 4-fold walk-forward validation
-15. `15_winter_smog_ablation.ipynb` — Winter/smog feature ablation
-
-## 23. Deployment and Production Hardening
-
-### 23.1 Deployment Architecture
-
-The final deployment architecture enforces a strict physical separation between user interface rendering and backend model inference:
+The frontend is an interactive Streamlit application (`src/dashboard/`):
 
 ```text
-GitHub Repository
-       │
-       ├── Streamlit Community Cloud
-       │       └── Streamlit Frontend (src/dashboard/app.py)
-       │                │
-       │                │ HTTPS REST API Requests
-       │                ▼
-       └── Render (Free Web Service)
-               └── Flask REST API (src/api/app.py)
-                    ├── RuntimeAssetResolver
-                    ├── EXP-019 Production Hybrid Model
-                    ├── Empirical Prediction Error Intervals
-                    ├── SHAP Explainability Engine
-                    └── Bootstrap Feature Vector
+Streamlit Dashboard Structure:
+├── Header & Lahore Context: "Pearls Air — Lahore AQI Forecast"
+├── Top-Level Alert Banners: Emergency alerts, forecast severe warnings, stale telemetry warnings
+├── Hero Observation Card:
+│   ├── Current AQI Value & EPA Category Badge
+│   ├── Semicircular Gauge Component with EPA Color Mapping
+│   ├── "What is affecting air quality now?" Context Card
+│   └── Current Pollutant Breakdown (PM2.5, PM10, NO2, SO2, CO, O3) & Weather Metrics
+├── 72-Hour Outlook Summary Card:
+│   └── Current-to-Peak Progression, Peak AQI, Highest Category, First Unhealthy Hour, Peak Horizon
+├── Interactive 72-Hour Trajectory Chart (Plotly):
+│   ├── Point Prediction Curve anchored to physical observation timestamp
+│   ├── Empirical Prediction Error Interval Bands (10th to 90th percentile OOF residuals)
+│   ├── Reference Category Threshold Lines (151 Unhealthy, 201 Very Unhealthy, 301 Hazardous)
+│   └── Multi-Horizon Milestone Cards (+1h, +12h, +24h, +48h, +72h)
+├── Health Guidance & Actionable Recommendations: Category-tailored advice for sensitive groups & general public
+├── SHAP-Powered Explainability ("Why this forecast?"):
+│   ├── Horizon-Specific Attribution Decomposition (Interactive Horizon Slider h1..72)
+│   ├── Top Driving Features with Non-Causal Directional Labels ("upward pressure", "downward pressure")
+│   └── Global Feature Importance Visualization across 72 Horizons
+└── Model Provenance & Telemetry Metadata Card:
+    └── Architecture details, offline validation benchmarks, active data source, and physical observation timestamps
 ```
 
-This decoupled topology provides significant operational advantages:
-1.  **Separation of Concerns**: Presentation logic in Streamlit remains completely decoupled from model execution and data ingestion.
-2.  **Resource and Dependency Optimization**: The Streamlit frontend installs only 41 lightweight UI packages (~40 MB footprint) from `src/dashboard/requirements.txt`, avoiding heavy machine learning frameworks on the frontend container.
-3.  **Credential and Data Isolation**: The Flask API manages all internal runtime assets, schemas, and credentials on the backend server, exposing only validated JSON contracts.
-4.  **Independent Lifecycle**: The frontend and backend deploy and scale independently. If the frontend restarts, backend inference caches remain intact; if the backend sleeps on standby, the frontend cleanly presents service status notices.
+### Key Frontend Characteristics
+*   **Decoupled Client**: `DashboardDataClient` queries the backend Flask API over HTTPS via `FLASK_API_URL`. Local inference fallback is disabled on cloud deployment (`ENABLE_LOCAL_FALLBACK=false`).
+*   **Physical Time Anchoring**: Forecast hours are anchored to physical observation time $T$, preventing time distortion.
+*   **Empirical Uncertainty Display**: Shaded error bands are clearly labeled as empirical residual quantiles from walk-forward testing.
 
-The system is deployed using **Streamlit Community Cloud** for the dashboard and **Render** for the Flask API, with Railway identified as a viable secondary backend alternative if additional memory or CPU resources become necessary.
+---
 
-### 23.2 Deployment Problems and Investigation
+## 14. Automation & MLOps Architecture (Phases 15 & 16)
 
-Transitioning from local development to cloud hosting revealed several critical architectural hurdles:
+The automation topology coordinates feature ingestion, feature store synchronization, candidate model evaluation, and inference serving:
 
-#### 1. Ignored Runtime Artifacts and Clean-Clone Divergence
-In local development, the model loader and feature pipeline read from `data/models/` and `data/processed/`. However, standard `.gitignore` rules correctly exclude these directories to prevent committing multi-megabyte training caches and raw datasets to Git. On a clean Git clone, the backend initially crashed because the model files did not exist.
-*   **Investigation**: I recognized that cloud deployment platforms (Render, Railway) build directly from clean Git checkouts. They have no access to untracked local developer directories.
-*   **Solution**: I created a dedicated, versioned `data/runtime/` package containing only the frozen champion model, scaler, schema, empirical error intervals, explainability reference matrices, and bootstrap vector. I updated `.gitignore` with explicit whitelist rules (`!data/runtime/`, `!data/runtime/**`) while keeping large training datasets excluded.
+```text
+                                  MLOps Production Topology
+                                  
+   [OpenWeather API]               [Open-Meteo API]
+          │                               │
+          └───────────────┬───────────────┘
+                          │
+       ┌──────────────────┴──────────────────┐
+       │ Primary Trigger:                    │ Backup Trigger:
+       │ Render Cron Job                     │ GitHub Actions Cron
+       │ (15 * * * * UTC)                    │ (17 * * * * UTC)
+       │ aqi-hourly-ingest-trigger           │ feature_pipeline.yml
+       └──────────────────┬──────────────────┘
+                          │ repository_dispatch {"event_type":"hourly_ingest"}
+                          ▼
+            [GitHub Actions: Feature Pipeline]
+            (run_hourly_ingestion --live --lookback-hours 72)
+                          │
+                          │ Validates 114/114 Schema & Streaming Write
+                          ▼
+             [Hopsworks Feature Store]
+             (aqi_weather_features_v2, Version 1)
+             ├── Online Store (RonDB) ──> Sub-second KV queries
+             └── Offline Store (Hudi) ──> 48,718 historical records (Sep 7 Snapshot)
+                          │
+          ┌───────────────┴───────────────┐
+          │                               │
+          ▼ (Daily 02:45 UTC)             ▼ (Hourly / On-Demand)
+[Daily Candidate Training]        [Observation Resolver]
+- Reads offline Hudi store        - Queries RonDB online store
+- 73h Embargo Split               - Falls back to bootstrap vector
+- Evaluates candidate models      - Validates 114 canonical features
+- Asserts champion immutability           │
+- Never auto-promotes                     ▼
+                               [Render Web Service]
+                               (Flask REST API: aqi-forecasting-api)
+                               - Serves EXP-019 frozen runtime bundle
+                               - Computes 72h forecast & SHAP attributions
+                                          │
+                                          │ HTTPS REST API
+                                          ▼
+                               [Streamlit Cloud Frontend]
+                               (https://aqi-forecasting.streamlit.app)
+```
 
-#### 2. Hopsworks Cloud Audit and Architectural Realignment
-Phase 16 implemented Hopsworks integration using local mock tests. When auditing the live cloud environment, I encountered DNS deprecation issues with the legacy `c.app.hopsworks.ai` endpoint in Hopsworks 3.4.0. Testing with the modern Hopsworks 5.0.6 client successfully authenticated against the cloud project `aqi_predictor_by_Waleed` (ID: 44159) via `https://eu-west.cloud.hopsworks.ai:443`.
-*   **Findings**: The initial live cloud Feature Store contained zero feature groups and zero registered models.
-*   **Resolution**: To prevent unpopulated remote infrastructure from blocking deployment, I established the self-contained `data/runtime/` package as the authoritative production source. Subsequently, the live Feature Store was successfully populated with feature group `aqi_weather_features_v2` (version 1), ingesting all 48,715 historical observations into offline storage and synchronizing the latest observation into online storage with verified 114-feature canonical parity. The deployed Streamlit and Render services continue to operate independently from self-contained runtime assets.
+### 14.1 Hourly Feature Ingestion Workflow
+*   **Primary Scheduler**: Independent Render Cron Job `aqi-hourly-ingest-trigger` scheduled at `15 * * * *` UTC. Sends `POST /repos/hwaleedkhalid/aqi-forecasting-system/dispatches` with `{"event_type": "hourly_ingest"}`.
+*   **Backup Scheduler**: Native GitHub Actions schedule at `17 * * * *` UTC in `.github/workflows/feature_pipeline.yml`.
+*   **Single Ingestion Executor**: GitHub Actions runner executes canonical `run_hourly_ingestion.py`. No feature-engineering logic is duplicated on the external scheduler.
+*   **Idempotency (`upsert_if_newer`)**: Dual triggers for the same provider timestamp $T$ execute idempotently without row duplication.
+*   **Lookback Construction**: Fetches 72 hours of pollutant and weather telemetry to assemble unbroken 24-hour backward lag and rolling windows.
+*   **Credential Security**: `GITHUB_TOKEN` is stored as a protected environment variable on Render with fine-grained permission `Contents: Read and write`.
 
-#### 3. Bootstrap Feature Vector and Ingestion Hierarchy
-A naive assumption was that the backend could reconstruct input features on the fly by querying current OpenWeather observations.
-*   **Investigation**: EXP-019 requires 114 engineered features, including 24-hour pollutant lags, rolling statistics, cross-pollutant chemical ratios, and multi-hour weather differentials. A single point-in-time API response lacks the 24+ hours of unbroken historical context required to compute these features.
-*   **Solution**: I established a committed canonical bootstrap feature vector (`data/runtime/bootstrap/latest_feature_vector.json`) representing a validated 114-column observation row. The runtime resolution hierarchy prioritizes: (1) verified fresh feature pipeline outputs, (2) Hopsworks Feature Store vectors when populated, and (3) committed bootstrap vectors.
+---
 
-#### 4. Data Freshness and Observation Anchoring
-To avoid misleading users, the application implements strict data freshness transparency:
-*   The committed bootstrap vector is timestamped `2026-08-31T07:00:00+00:00`.
-*   The API calculates input age (`now - input_observed_at`) and marks `is_stale=true` whenever age exceeds 3.0 hours.
-*   The Streamlit dashboard prominently renders a warning banner explaining that telemetry is historical.
-*   Crucially, forecast timestamps (h1 through h72) are anchored to `forecast_origin = input_observed_at`, spanning `2026-08-31T08:00:00+00:00` to `2026-09-03T07:00:00+00:00`, rather than shifting dynamically with the client request time.
+## 15. Daily Candidate Training and Evaluation from Hopsworks Feature Store
 
-#### 5. Frontend Dependency Leakage
-Initial frontend code imported `from src.inference.predictor import AQIPredictor` at the top of `src/dashboard/data_client.py`. When Streamlit Cloud attempted to build the dashboard with a lightweight dependency list, it failed because `AQIPredictor` pulled in `scikit-learn`, `lightgbm`, and `shap`.
-*   **Solution**: I refactored `DashboardDataClient` to remove top-level inference imports, configured `ENABLE_LOCAL_FALLBACK=false` for cloud deployment, lazy-imported `AQIPredictor` strictly inside local fallback branches, and created `src/dashboard/requirements.txt` containing only UI packages.
-
-#### 6. Render Memory Profiling and Concurrency Sizing
-Render's free tier provides 512 MB RAM and 0.1 CPU. I conducted live process memory profiling across all endpoint states using a continuous high-frequency background RSS sampler (5ms interval):
-*   **Flask Startup & EXP-019 Load**: 176.95 MB RSS
-*   **72-Hour Forecast Execution**: 178.62 MB to 185.08 MB RSS
-*   **SHAP Multi-Horizon Explainability Peak**: 360.81 MB transient peak RSS (settling back to 190.06 MB after garbage collection)
-*   **Render Free Allocation**: 512.00 MB
-*   **Available Headroom at Transient Peak**: 151.19 MB (29.5% free headroom)
-
-*Analysis*: The backend fits comfortably within Render's 512 MB allocation for a single worker. However, because SHAP creates transient allocation matrices during multi-horizon tree and linear evaluation, running multiple Gunicorn workers would duplicate memory and risk out-of-memory termination. While the deployment was configured with `gunicorn src.api.app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120`, memory profiling confirms that a single worker (`--workers 1`) is the conservative and stable operational model.
-
-#### 7. Build Environment and Dependency Resolution
-During initial deployment on Render, two build issues occurred:
-*   **Default Python Version**: Render defaulted to Python 3.14, which lacked pre-compiled binary wheels for machine learning libraries. I pinned Python `3.10.14` via a root `.python-version` file.
-*   **Pip Backtracking**: Including offline baseline tools (`tensorflow>=2.13`) and legacy client constraints (`hopsworks<4.0`) in the root `requirements.txt` caused pip to backtrack across 10 years of C++ source tarballs (`grpcio`, `google-pasta`), causing build timeouts. I separated runtime dependencies into `requirements.txt` (installing in <30 seconds) and developer dependencies into `requirements-dev.txt`.
-
-#### 8. Cross-Platform Line-Ending Hashes
-On Windows, Git checked out JSON files with CRLF (`\r\n`), whereas Linux (Render) checked them out with LF (`\n`). This caused SHA256 checksum mismatches on text configuration files during boot.
-*   **Solution**: I added `.gitattributes` enforcing `*.json text eol=lf` and updated `compute_file_sha256` in `src/inference/runtime_resolver.py` to normalize JSON text to LF before hashing.
-
-#### 9. Clean CI Runner Directory Structure and Offline Mocking
-When running the full test suite in ephemeral GitHub Actions runners, several setup tests failed because Git ignores empty directories (`data/raw/`, `data/processed/`, `data/models/`). Furthermore, clean-clone test jobs lack external API credentials and local training CSVs.
-*   **Solution**: I introduced tracked `.gitkeep` markers across all data subdirectories (`!data/**/.gitkeep` in `.gitignore`), committed the canonical `feature_schema_v2_weather.json` to Git, and wired fallback resolution to committed bootstrap vectors. All external cloud and API endpoints remain strictly mocked in test suites, allowing CI workflow runs to complete 100% green (389 passed tests, 72.43% coverage) without requiring secrets or network access.
-
-### 23.3 Runtime Integrity and Validation
-
-The runtime layer implements a fail-closed integrity system managed by `RuntimeAssetResolver`:
-*   **Cryptographic SHA256 Checksums**: Validates production artifacts against `manifest.json` on boot. Any tampered model file or corrupted byte triggers an immediate `ValidationError` and returns HTTP 503.
-*   **Model-Explainer Binding**: `explainer_manifest.json` binds the SHA256 hashes of the model, schema, and background matrix to ensure explainability artifacts cannot be used with mismatched models.
-*   **Bootstrap Schema Binding**: `latest_feature_vector.json` encodes `schema_sha256`, which must match the active production schema.
-*   **Finite Numeric Enforcement**: Validates that all 114 features are present in canonical order and rejects non-finite numeric entries (`NaN`, `Infinity`, `-Infinity`).
-*   **Timestamp Parsing**: Strictly validates ISO 8601 UTC timestamps.
-
-These checks serve as robust internal corruption-detection mechanisms to guarantee runtime stability.
-
-### 23.4 Clean-Clone Verification
-
-To prove production readiness, I conducted a genuine clean-clone test in an isolated temporary directory:
-1.  Cloned the repository into a fresh directory completely devoid of local files.
-2.  Verified that `.env`, `data/models/`, `data/processed/`, `data/raw/`, and `data/logs/` were completely absent.
-3.  Booted Flask using only committed `data/runtime/` assets.
-4.  Executed endpoint verification:
-    *   `GET /api/health` -> HTTP 200 OK (`service_ready: true`, `model_id: "EXP-019"`).
-    *   `GET /api/current` -> HTTP 200 OK (`current_aqi: 100.0`, `is_stale: true`, exact parity with historical August 31 row).
-    *   `GET /api/forecast` -> HTTP 200 OK (72 horizons, Origin `2026-08-31T07:00:00+00:00`, H1 `2026-08-31T08:00:00+00:00`, H72 `2026-09-03T07:00:00+00:00`).
-    *   `GET /api/model/info` -> HTTP 200 OK (`EXP-019`, 114 features, R² 0.4858).
-    *   `GET /api/explain?horizon=24` -> HTTP 200 OK (Predicted AQI `154.15`, matching forecast H24; additivity error `< 1e-6`).
-
-
-### 23.5 CORS and Frontend/API Communication
-
-The Streamlit dashboard communicates with the Flask REST API via server-side Python `requests`. Because the HTTP requests originate from the Streamlit Cloud server rather than the end-user's browser, browser-enforced Cross-Origin Resource Sharing (CORS) restrictions do not apply to the primary dashboard data path. Nevertheless, CORS middleware is configured on the Flask API (`CORS_ORIGINS=*`) to support future browser-based single-page applications or third-party client integrations.
-
-### 23.6 Final Live Deployment
-
-The system is publicly deployed and operational:
-*   **Live Frontend**: [https://aqi-forecasting.streamlit.app](https://aqi-forecasting.streamlit.app) (Streamlit Community Cloud)
-*   **Live Backend REST API**: [https://aqi-forecasting-xyyb.onrender.com/api](https://aqi-forecasting-xyyb.onrender.com/api) (Render Free Web Service)
-
-*(Note: These represent the verified deployment endpoints at final project testing time. Third-party hosting availability is not permanently guaranteed.)*
-
-**Verified User-Facing Capabilities**:
-*   **Telemetry Overview**: Displays bootstrap baseline AQI (100.0, Moderate) with a prominent stale data warning banner.
-*   **72-Hour Forecast Trajectory**: Interactive Plotly curve displaying predictions anchored to `2026-08-31T07:00:00+00:00`.
-*   **Empirical Prediction Error Intervals**: Shaded residual bands reflecting walk-forward empirical uncertainty (10th to 90th percentiles).
-*   **Multi-Horizon Milestone Cards**: Summaries for key milestones (+1h, +12h, +24h, +48h, +72h).
-*   **SHAP Feature Attribution Explorer**: Interactive slider allowing users to inspect feature impact across any horizon from 1 to 72.
-*   **Model Provenance**: Sidebar detailing architecture, training span, test benchmarks, and active REST API source mode.
-
-### 23.7 Deployment Challenges Summary
-
-| Challenge | Cause | Investigation | Solution | Result |
-| :--- | :--- | :--- | :--- | :--- |
-| **Ignored Runtime Artifacts** | `data/models/` and `data/processed/` excluded by `.gitignore`. | Clean Git clone on cloud servers failed due to missing model files. | Created self-contained `data/runtime/` package and added explicit `.gitignore` whitelist rules. | Clean clones boot deterministically without untracked files. |
-| **Hopsworks Cloud Dependency** | Remote Hopsworks instance contained 0 feature groups and 0 models. | Live cloud audit revealed Phase 16 was developed using integration mocks. | Made `data/runtime/` the primary source of truth; preserved Hopsworks as optional integration. | Deployment operates independently of remote feature store status. |
-| **Feature Reconstruction on Boot** | EXP-019 requires 114 engineered lag and rolling features. | Single OpenWeather API call cannot reconstruct 24+ hours of historical context. | Created canonical bootstrap feature vector (`latest_feature_vector.json`). | Cold-start boot reliably generates valid 72-hour forecasts. |
-| **Frontend Dependency Bloat** | `data_client.py` imported `AQIPredictor` at module scope. | Streamlit Cloud attempted to install heavy ML packages (`shap`, `lightgbm`). | Lazy-imported predictor inside fallback branch, set `ENABLE_LOCAL_FALLBACK=false`, and created `src/dashboard/requirements.txt`. | Frontend container installs in 1.6s with only 41 lightweight UI packages. |
-| **Render Memory Constraints** | Free tier allocates 512 MB RAM. | Continuous 5ms sampling revealed transient SHAP attribution peak of 360.81 MB. | Restricted Gunicorn concurrency to a single application worker (`--workers 1`). | API runs stably with 151.19 MB (29.5%) headroom during peak calculation. |
-| **Build Dependency Conflicts** | `tensorflow` and legacy `hopsworks<4.0` in root `requirements.txt`. | Pip backtracked across 10 years of C++ source tarballs, causing 19+ min build timeouts. | Separated runtime requirements into `requirements.txt` and dev tools into `requirements-dev.txt`. | Render build completed in under 45 seconds using pre-compiled wheels. |
-| **WSGI Start Command Syntax** | Unquoted parentheses `create_app()` in Render start command. | Linux bash parsed parentheses as shell subshell operators, exiting with status 2. | Exported module-level `app = create_app()` in `src/api/app.py` and updated start command to `src.api.app:app`. | Gunicorn boots cleanly on Render startup. |
-| **Cross-Platform Checksum Mismatches** | Windows CRLF (`\r\n`) vs Linux LF (`\n`) line endings in JSON text files. | Hash of `feature_schema_v2_weather.json` diverged between development and Render Linux. | Added `.gitattributes` enforcing `eol=lf` and updated resolver to normalize JSON text before hashing. | SHA256 checksums match identically across Windows and Linux. |
-
-### 23.8 Final Project Outcome
-
-The Pearls AQI Predictor project is fully implemented, thoroughly tested, and publicly deployed. The application is reproducibly bootable from a clean Git clone, hosted across Streamlit Community Cloud and Render, and accessible through an interactive web dashboard backed by a high-speed Flask REST API. Operating on the frozen champion model EXP-019, the system delivers 72 continuous hourly predictions with empirical prediction error intervals, multi-horizon SHAP feature attributions, and transparent data freshness indicators.
-
-## 24. Daily Candidate Training and Evaluation from Hopsworks Feature Store
-
-### 24.1 Objectives and Operational Context
-
-To complete the full MLOps automation lifecycle, I implemented and verified a daily Feature-Store-driven candidate model training and evaluation pipeline. While the hourly ingestion pipeline (`feature_pipeline.yml` at `17 * * * *`) continuously publishes fresh telemetry and meteorology into the Hopsworks Feature Store (`aqi_weather_features_v2` v1), the training pipeline operationalizes the consumption of this accumulated offline store.
+### 15.1 Objectives and Operational Context
+To complete the full MLOps automation lifecycle, a daily Feature-Store-driven candidate model training and evaluation pipeline was implemented. While the hourly ingestion pipeline continuously publishes fresh telemetry and meteorology into the Hopsworks Feature Store (`aqi_weather_features_v2` v1), the training pipeline operationalizes the consumption of this accumulated offline store.
 
 The daily candidate training workflow operates under strict scientific and operational constraints:
-1. **Feature-Store-Driven Training**: Authoritative historical training data is retrieved directly from the Hopsworks Feature Store rather than re-downloading raw external APIs.
-2. **Strict Production Champion Immutability**: EXP-019 remains the immutable production champion. Under no circumstances does the daily pipeline automatically promote, overwrite, or deploy candidate models.
-3. **Temporal Validity & Anti-Leakage Invariants**: Strict chronological splitting, physical timestamp target construction, and a mandatory 73-hour embargo gap prevent any information leakage from future observations into earlier training partitions.
-4. **Protected Holdout Preservation**: Candidate development is strictly quarantined to observations prior to June 7, 2025. The entire 10,211-row post-cutoff/quarantined region (spanning June 7, 2025 through September 7, 2026), which contains the formal protected 9,311-sample final test partition (2025-06-07 to 2026-08-28) plus later accumulated observations, remains 100% untouched.
+1.  **Feature-Store-Driven Training**: Authoritative historical training data is retrieved directly from the Hopsworks Feature Store rather than re-downloading raw external APIs.
+2.  **Strict Production Champion Immutability**: EXP-019 remains the immutable production champion. Under no circumstances does the daily pipeline automatically promote, overwrite, or deploy candidate models.
+3.  **Temporal Validity & Anti-Leakage Invariants**: Strict chronological splitting, physical timestamp target construction, and a mandatory 73-hour embargo gap prevent any information leakage from future observations into earlier training partitions.
+4.  **Protected Holdout Preservation**: Candidate development is strictly quarantined to observations prior to June 7, 2025. The entire 10,211-row post-cutoff/quarantined region (spanning June 7, 2025 through September 7, 2026), which contains the formal protected 9,311-sample final test partition (2025-06-07 to 2026-08-28) plus later accumulated observations, remains 100% untouched.
 
-### 24.2 Authoritative Feature Store Data Retrieval
-
+### 15.2 Authoritative Feature Store Data Retrieval
 The training pipeline implements `FeatureStoreTrainingLoader` (`src/training_pipeline/dataset_builder.py`) to interface directly with the offline store:
-* **Feature Group & Entity Query**: Queries `aqi_weather_features_v2` (version 1) on project `aqi_predictor_by_Waleed` with a strict entity filter: `fg.select_all().filter(fg.location_id == "lahore").read()`.
-* **Bounded Arrow Flight Timeout**: Historical reads retrieve the full time series across the internet via Apache Arrow Flight. To prevent indefinite hangs in cloud runner environments, `read_options={"timeout": 300}` enforces a bounded 5-minute timeout.
-* **Auditable Deduplication**: Event timestamps (`dt`) are validated for strict integral Unix seconds. Duplicate event timestamps are audited: identical feature vectors at duplicate timestamps are deduplicated and logged with full audit counts, while conflicting feature values at the same timestamp raise an immediate `ValidationError`.
-* **Schema & Finiteness Audits**: Asserts the exact presence of all 114 canonical model-input columns (including `dt`). All features are audited for numeric finiteness; any `NaN` or `Inf` values raise a `ValidationError`.
+*   **Feature Group & Entity Query**: Queries `aqi_weather_features_v2` (version 1) on project `aqi_predictor_by_Waleed` with an entity filter: `fg.select_all().filter(fg.location_id == "lahore").read()`.
+*   **Bounded Arrow Flight Timeout**: Historical reads retrieve the full time series via Apache Arrow Flight with `read_options={"timeout": 300}` enforcing a bounded 5-minute timeout.
+*   **Auditable Deduplication**: Event timestamps (`dt`) are validated for strict integral Unix seconds. Duplicate event timestamps are audited: identical feature vectors at duplicate timestamps are deduplicated and logged with full audit counts, while conflicting feature values at the same timestamp raise an immediate `ValidationError`.
+*   **Schema & Finiteness Audits**: Asserts the exact presence of all 114 canonical model-input columns (including `dt`). All features are audited for numeric finiteness; any `NaN` or `Inf` values raise a `ValidationError`.
 
-In live execution, the query successfully retrieved **48,718 historical hourly records** spanning from `2020-11-28 13:00:00 UTC` (`dt=1606568400`) through `2026-09-07 21:00:00 UTC` (`dt=1788814800`). The latest materialized offline row had an age of approximately 12.7 hours, successfully verifying asynchronous offline Hudi materialization.
+In live execution, the query retrieved **48,718 historical hourly records** (verified offline audit snapshot as of `2026-09-07 21:00:00 UTC`, `dt=1788814800`, spanning from `2020-11-28 13:00:00 UTC`).
 
-### 24.3 Protected Holdout Preservation
-
+### 15.3 Protected Holdout Preservation
 To maintain scientific integrity and prevent data dredging across the production test set, candidate training enforces a hard temporal boundary:
 $$\text{HOLDOUT\_START\_DT} = 1749254400 \quad (2025\text{-}06\text{-}07\text{T}00:00:00\text{Z})$$
 
-* **Quarantined Development Period**: Only observations strictly prior to `2025-06-07T00:00:00Z` ($dt < 1749254400$) are admitted into candidate development, yielding **38,507 development samples** (spanning November 28, 2020 to June 6, 2025).
-* **Post-Cutoff/Quarantined Region**: Exactly **10,211 samples** (June 7, 2025 through September 7, 2026) are quarantined and preserved completely untouched. This post-cutoff region contains the formal protected 9,311-sample out-of-time final test partition (2025-06-07 to 2026-08-28) plus later accumulated observations. EXP-019 holdout metrics (RMSE 75.91, MAE 53.55, R² 0.4858) serve strictly as frozen reference benchmarks.
+*   **Quarantined Development Period**: Only observations strictly prior to `2025-06-07T00:00:00Z` ($dt < 1749254400$) are admitted into candidate development, yielding **38,507 development samples** (spanning November 28, 2020 to June 6, 2025).
+*   **Post-Cutoff/Quarantined Region**: Exactly **10,211 samples** (June 7, 2025 through September 7, 2026) are quarantined and preserved completely untouched. This post-cutoff region contains the formal protected 9,311-sample out-of-time final test partition (2025-06-07 to 2026-08-28) plus later accumulated observations. EXP-019 holdout metrics (RMSE 75.91, MAE 53.55, $R^2$ 0.4858) serve strictly as frozen reference benchmarks.
 
-### 24.4 Exact Physical Timestamp Target Construction
-
+### 15.4 Exact Physical Timestamp Target Construction
 In contrast to naive row-shifting (which silently corrupts multi-horizon targets when sensor dropouts create timestamp gaps), `FeatureStoreTrainingLoader.construct_physical_targets()` enforces exact physical timestamp semantics:
 $$y_{T, h} = \text{AQI}(T + h \times 3600) \quad \text{for } h = 1, \dots, 72$$
 
-1. Each observation at timestamp $T$ indexes the target lookup dictionary for the exact timestamp $T + h \times 3600$.
-2. If any of the required 72 physical future hourly observations is missing due to an unbridgeable historical gap, the training sample is cleanly dropped.
-3. No synthetic interpolation or forward-filling is applied to prediction targets.
+1.  Each observation at timestamp $T$ indexes the target lookup dictionary for the exact timestamp $T + h \times 3600$.
+2.  If any of the required 72 physical future hourly observations is missing due to an unbridgeable historical gap, the training sample is cleanly dropped.
+3.  No synthetic interpolation or forward-filling is applied to prediction targets.
 
 Across the 38,507 development records, physical target alignment retained **37,163 valid training samples** (1,344 samples at historical gap boundaries were cleanly discarded).
 
-### 24.5 Strict Anti-Leakage Embargo Split
-
+### 15.5 Strict Anti-Leakage Embargo Split
 To evaluate candidates without temporal leakage, the 37,163 usable samples are split chronologically (80% train / 20% validation) with a mandatory 73-hour embargo gap:
-* **Train Cutoff Calculation**: For split timestamp $T_{\text{split}}$, the last allowed training input timestamp is:
-  $$T_{\text{train\_cutoff}} = T_{\text{split}} - (72 \times 3600) - 3600$$
-* **Leakage Invariant Verification**: The audit asserts two non-negotiable invariants:
-  $$\min(T_{\text{val\_input}}) > \max(T_{\text{train\_input}}) + 72\text{h}$$
-  $$\max(T_{\text{train\_target}}) < \min(T_{\text{val\_input}})$$
-* **Leakage Audit Results**:
-  * **Train Partition**: 29,658 samples (`2020-11-28 13:00:00 UTC` to `2024-06-20 06:00:00 UTC`)
-  * **Validation Partition**: 7,433 samples (`2024-06-23 07:00:00 UTC` to `2025-06-03 23:00:00 UTC`)
-  * **Embargo Separation**: Exact **73.0 hours** between final train input and first validation input (72 boundary samples purged).
-  * **Status**: Leakage audit **PASSED**.
+*   **Train Cutoff Calculation**: For split timestamp $T_{\text{split}}$, the last allowed training input timestamp is:
+    $$T_{\text{train\_cutoff}} = T_{\text{split}} - (72 \times 3600) - 3600$$
+*   **Leakage Invariant Verification**: The audit asserts two non-negotiable invariants:
+    $$\min(T_{\text{val\_input}}) > \max(T_{\text{train\_input}}) + 72\text{h}$$
+    $$\max(T_{\text{train\_target}}) < \min(T_{\text{val\_input}})$$
+*   **Leakage Audit Results**:
+    *   **Train Partition**: 29,658 samples (`2020-11-28 13:00:00 UTC` to `2024-06-20 06:00:00 UTC`)
+    *   **Validation Partition**: 7,433 samples (`2024-06-23 07:00:00 UTC` to `2025-06-03 23:00:00 UTC`)
+    *   **Embargo Separation**: Exact **73.0 hours** between final train input and first validation input (72 boundary samples purged).
+    *   **Status**: Leakage audit **PASSED**.
 
-### 24.6 Leakage-Safe Preprocessing & Feature Isolation
+### 15.6 Leakage-Safe Preprocessing & Feature Isolation
+*   **Predictor Matrix**: The 114 canonical columns contain `dt`, which is retained exclusively for temporal ordering, fold construction, and provenance tracking. It is strictly excluded from the fitted feature matrix, leaving exactly **113 model predictors**.
+*   **Train-Only Scaling**: `StandardScaler` is fitted strictly on the training partition ($X_{\text{train}}$). The validation partition ($X_{\text{val}}$) is transformed using these frozen mean and variance parameters without any re-fitting.
 
-* **Predictor Matrix**: The 114 canonical columns contain `dt`, which is retained exclusively for temporal ordering, fold construction, and provenance tracking. It is strictly excluded from the fitted feature matrix, leaving exactly **113 model predictors**.
-* **Train-Only Scaling**: `StandardScaler` is fitted strictly on the training partition ($X_{\text{train}}$). The validation partition ($X_{\text{val}}$) is transformed using these frozen mean and variance parameters without any re-fitting.
-
-### 24.7 Candidate Model Architectures & Dynamic Recommendation Gate
-
+### 15.7 Candidate Model Architectures & Dynamic Recommendation Gate
 The candidate training runner (`src/training_pipeline/run_daily_candidate.py`) supports four candidate model families:
-1. `ridge`: MultiOutputRegressor wrapping `Ridge(alpha=10.0, random_state=42)`. The candidate Ridge model employs L2 regularization parameter $\alpha=10.0$ tuned to prevent overfitting across the 113 collinear weather and pollutant features (in contrast to the internal Ridge specialist in EXP-019 which utilizes $\alpha=1.0$ within the hybrid pipeline).
-2. `hybrid`: Multi-stage hybrid architecture mirroring EXP-019 (LightGBM on h1–h6, Ridge on h7–h37, blended Ridge + Persistence on h38–h72 with `min_blend_weight=0.7`).
-3. `lightgbm`: Direct multi-output gradient boosting across all 72 horizons.
-4. `random_forest`: MultiOutputRegressor wrapping `RandomForestRegressor`.
+1.  `ridge`: MultiOutputRegressor wrapping `Ridge(alpha=10.0, random_state=42)`. The candidate Ridge model employs L2 regularization parameter $\alpha=10.0$ tuned to prevent overfitting across the 113 collinear weather and pollutant features (in contrast to the internal Ridge specialist in EXP-019 which utilizes $\alpha=1.0$ within the hybrid pipeline).
+2.  `hybrid`: Multi-stage hybrid architecture mirroring EXP-019 (LightGBM on h1–h6, Ridge on h7–h37, blended Ridge + Persistence on h38–h72 with `min_blend_weight=0.7`).
+3.  `lightgbm`: Direct multi-output gradient boosting across all 72 horizons.
+4.  `random_forest`: MultiOutputRegressor wrapping `RandomForestRegressor`.
 
 #### Dynamic Recommendation Gate
-Under NO circumstances does the gate use EXP-019 out-of-time holdout RMSE (75.91) as a numeric threshold, because the candidate is evaluated on the pre-holdout development validation partition. The pipeline dynamically classifies the outcome into:
-* `retain_champion` (default): Candidate failed to strictly beat persistence across overall RMSE or milestone horizons (h1, h24, h72), failed to meet the $\ge 20.0\%$ quality improvement threshold (`meets_quality_threshold`), or exhibited material subset regressions on extreme AQI regimes (`extreme_gt200_ok`, `extreme_gt300_ok`).
-* `manual_review_recommended`: Candidate demonstrated statistically valid improvements over persistence on the same evaluation protocol ($\ge 20.0\%$ improvement, beating persistence at h1, h24, h72), passed all stability invariants without extreme subset regressions, and merits offline inspection by the engineering team (under NO circumstances automatically promoted or deployed).
+Under no circumstances does the gate use EXP-019 out-of-time holdout RMSE (75.91) as a numeric threshold, because the candidate is evaluated on the pre-holdout development validation partition. The pipeline dynamically classifies the outcome into:
+*   `retain_champion` (default): Candidate failed to strictly beat persistence across overall RMSE or milestone horizons (h1, h24, h72), failed to meet the $\ge 20.0\%$ quality improvement threshold (`meets_quality_threshold`), or exhibited material subset regressions on extreme AQI regimes (`extreme_gt200_ok`, `extreme_gt300_ok`).
+*   `manual_review_recommended`: Candidate demonstrated statistically valid improvements over persistence on the same evaluation protocol ($\ge 20.0\%$ improvement, beating persistence at h1, h24, h72), passed all stability invariants without extreme subset regressions, and merits offline inspection by the engineering team (under no circumstances automatically promoted or deployed).
 
-### 24.8 Controlled Live Training Run Results
-
+### 15.8 Controlled Live Training Run Results
 A complete live training run was executed against the live Hopsworks Feature Store on GitHub Actions (Run [`34213609930`](https://github.com/hwaleedkhalid/aqi-forecasting-system/actions/runs/34213609930), Workflow Artifact `10050847367` `evaluation.json`, `candidate_family="ridge"`, $\alpha=10.0$):
 
 | Metric / Dimension | Candidate Model (`ridge`, $\alpha=10.0$) | Naive Persistence Baseline | Relative Improvement |
 | :--- | :--- | :--- | :--- |
 | **Overall RMSE** | **86.93** | 121.07 | **+28.20% gain** |
 | **Overall MAE** | **63.54** | 81.79 | **+22.31% gain** |
-| **Overall R²** | **0.5440** | 0.1155 | **+0.4285 delta** |
+| **Overall $R^2$** | **0.5440** | 0.1155 | **+0.4285 delta** |
 | **h+1 RMSE** | **55.05** | 68.03 | **+19.08% gain** |
 | **h+6 RMSE** | **72.18** | 100.94 | **+28.50% gain** |
 | **h+24 RMSE** | **84.14** | 105.76 | **+20.44% gain** |
@@ -582,12 +477,11 @@ A complete live training run was executed against the live Hopsworks Feature Sto
 | **Severe AQI (>200) RMSE** | **102.14** (n=262,312) | 140.83 | **+27.47% gain** |
 | **Hazardous AQI (>300) RMSE** | **118.67** (n=152,831) | 157.59 | **+24.70% gain** |
 
-* **Execution Runtime**: 50.01 seconds.
-* **Recommendation**: `manual_review_recommended` (achieved 28.20% gain vs persistence exceeding $\ge 20.0\%$ threshold, beat persistence across h1, h24, h72 without extreme subset regressions on development validation).
-* **Reference Comparison Note**: Candidate validation metrics (evaluating 2024–2025 pre-holdout validation data) cannot be directly compared to EXP-019 holdout test metrics (evaluating 2025–2026 out-of-time holdout data: RMSE = 75.91, MAE = 53.55, R² = 0.4858). They reflect separate temporal evaluation regimes.
+*   **Execution Runtime**: 50.01 seconds.
+*   **Recommendation**: `manual_review_recommended` (achieved 28.20% gain vs persistence exceeding $\ge 20.0\%$ threshold, beat persistence across h1, h24, h72 without extreme subset regressions on development validation).
+*   **Reference Comparison Note**: Candidate validation metrics (evaluating 2024–2025 pre-holdout validation data) cannot be directly compared to EXP-019 holdout test metrics (evaluating 2025–2026 out-of-time holdout data: RMSE = 75.91, MAE = 53.55, $R^2$ = 0.4858). They reflect separate temporal evaluation regimes.
 
-### 24.9 Candidate Artifact Isolation and SHA256 Integrity
-
+### 15.9 Candidate Artifact Isolation and SHA256 Integrity
 Candidate artifacts are strictly quarantined to unique, timestamped directories under `data/models/candidates/<run_id>/`:
 ```text
 data/models/candidates/candidate-20260908T094225Z-ridge/
@@ -601,35 +495,355 @@ data/models/candidates/candidate-20260908T094225Z-ridge/
 
 The runner actively asserts that the candidate directory is outside `data/runtime/production/`.
 
-### 24.10 Production Champion Immutability and Model Registry Verification
-
-Following the completion of the live candidate run:
-1. **Local Production Bundle Verification**: Computed SHA256 checksums of all 4 production files in `data/runtime/production/`:
-   * `production_hybrid_model.joblib`: `f51d2eff53b8eadaf7ddb615f1dc76aeed30526038c79cc68ae758e52d8412ee` (MATCH: True)
-   * `feature_scaler_v2_weather.joblib`: `9ce7e9fcc4fe65c279435b8109bf4397a61d15442df152a5538e1b6f0e470876` (MATCH: True)
-   * `feature_schema_v2_weather.json`: `38a5fdea89b0c5edba23f8cb20d36b81a8f60c4161b96a1a1f1e31dbeecb121e` (MATCH: True)
-   * `empirical_error_intervals.json`: `dba4571ebe0599aaeb3467fe287a93424d1a581eeb5c8fe221972f4400cb59f8` (MATCH: True)
-   * **Result**: All 4 production assets verified **100% byte-for-byte identical**.
-2. **Hopsworks Model Registry Audit**: Queried live model registry `aqi_predictor_by_Waleed`:
-   * `pearls_aqi_production_champion` contains exactly **1 version** (version 1, ID `pearls_aqi_production_champion_1`).
-   * Exactly **0 candidate models** were registered in the cloud registry.
-   * **Result**: Production champion remains completely unaltered.
-
-### 24.11 Daily GitHub Actions Automation Workflow
-
+### 15.10 Daily GitHub Actions Automation Workflow
 The training workflow (`.github/workflows/training_pipeline.yml`) has been updated and verified:
-* **Cron Schedule**: `45 2 * * *` (Daily at 02:45 UTC, providing a 28-minute buffer after hourly ingestion at minute 17).
-* **Concurrency Control**: `group: model-training-pipeline`, `cancel-in-progress: false` ensures training runs execute sequentially without race conditions.
-* **Security & Secrets**: Requires only `HOPSWORKS_API_KEY`, `HOPSWORKS_PROJECT`, and `HOPSWORKS_HOST`. No OpenWeather API key is required, demonstrating complete independence from external ingestion APIs.
-* **Pre/Post Immutability Assertion**: Directly hashes all four authoritative assets in `data/runtime/production/` before and after execution (`sha256sum ... > /tmp/prod_authoritative_hashes_before.txt` and `diff`), failing the entire workflow if any byte modification occurs.
-* **Artifact Retention**: Automatically uploads `data/models/candidates/` as a workflow artifact with 14-day retention.
-* **Workflow Dispatch**: The daily candidate training pipeline is configured to run daily and its exact production path has been verified through `workflow_dispatch` with `candidate_family` (`ridge`, `hybrid`, `lightgbm`, `random_forest`) and `dry_run` boolean flags.
+*   **Cron Schedule**: `45 2 * * *` (Daily at 02:45 UTC, providing a 30-minute buffer after primary Render cron at minute 15 and a 28-minute buffer after backup GitHub cron at minute 17).
+*   **Concurrency Control**: `group: model-training-pipeline`, `cancel-in-progress: false` ensures training runs execute sequentially without race conditions.
+*   **Security & Secrets**: Requires only `HOPSWORKS_API_KEY`, `HOPSWORKS_PROJECT`, and `HOPSWORKS_HOST`. No OpenWeather API key is required, demonstrating complete independence from external ingestion APIs.
+*   **Pre/Post Immutability Assertion**: Directly hashes all four authoritative assets in `data/runtime/production/` before and after execution (`sha256sum ... > /tmp/prod_authoritative_hashes_before.txt` and `diff`), failing the entire workflow if any byte modification occurs.
+*   **Artifact Retention**: Automatically uploads `data/models/candidates/` as a workflow artifact with 14-day retention.
+*   **Workflow Dispatch**: The daily candidate training pipeline is configured to run daily and its exact production path has been verified through `workflow_dispatch` with `candidate_family` (`ridge`, `hybrid`, `lightgbm`, `random_forest`) and `dry_run` boolean flags.
 
 ---
 
-## 25. High-Severity / Hazardous AQI Alert System
+## 16. Hopsworks Feature Store & Model Registry Details
 
-### 25.1 Centralized Classification Architecture & Single Source of Truth
+### 16.1 Production Feature Group
+*   **Feature Group Name**: `aqi_weather_features_v2`
+*   **Version**: **1** (Feature Group ID: `52526`)
+*   **Project**: `aqi_predictor_by_Waleed` (`eu-west.cloud.hopsworks.ai`)
+*   **Primary Key**: `["location_id"]`
+*   **Event Time**: `dt`
+*   **Online Storage**: RonDB enabled (sub-second point queries)
+*   **Offline Storage**: Apache Hudi (verified offline audit snapshot of 48,718 historical hourly observations from 2020-11-28 13:00 UTC to 2026-09-07 21:00 UTC)
+*   **Schema**: 115 columns (`location_id` + 114 canonical model-input features)
+
+### 16.2 Model Registry
+*   **Registered Model**: `pearls_aqi_production_champion` (Version 1, ID `pearls_aqi_production_champion_1`)
+*   **Registered Assets**: Runtime bundle matching `data/runtime/production/` with verified checksums.
+*   **Governance Policy**: Exactly 1 registered champion version; 0 candidate models in production registry; no automated promotion.
+*   **Serving Architecture**: Render WSGI service serves the verified, frozen local runtime bundle (`data/runtime/production/`) to eliminate startup download latency and external registry availability risks.
+
+---
+
+## 17. SHAP Explainability Engine (Phase 17)
+
+Explainability decomposes predictions according to the three zones of `PersistenceAwareHybridModel`:
+1.  **$h=1..6$**: `shap.TreeExplainer` on LightGBM estimators via interventional perturbation.
+2.  **$h=7..37$**: Interventional Linear SHAP on Ridge regressors:
+    $$\phi_{i, h} = \text{coef}_{i, h} \cdot (x_{\text{scaled}, i} - \mu_{\text{background}, i})$$
+3.  **$h=38..72$**: Mathematical blended decomposition:
+    $$\text{base\_value}_h = w_h \cdot b_{\text{Ridge}, h}, \quad \phi_{\text{final}, i, h} = w_h \cdot \phi_{\text{unweighted}, i, h}, \quad \text{persistence\_comp}_h = (1 - w_h) \cdot y_{\text{current}}$$
+
+### Validation and Additivity
+Mathematical additivity is asserted:
+$$\left| \left(\text{base\_value}_h + \sum_{i=1}^{114} \phi_{\text{final}, i, h} + \text{persistence\_comp}_h\right) - \hat{y}_{\text{preclip}, h} \right| < 10^{-6}$$
+
+Global feature importance was evaluated on a 500-sample seasonally stratified evaluation cohort. The reference background distribution utilized a separate, independent 100-sample background dataset. Explanations use non-causal directional language ("contributed upward pressure", "contributed downward pressure").
+
+---
+
+## 18. Automated Testing & Code Coverage
+
+The codebase is validated by **540 automated tests** spanning 35 test modules:
+
+```text
+=============================== Test Suite Summary ===============================
+Collected Items: 540 passed, 0 failed, 36 warnings
+Total Execution Time: ~1h 11m (including full multi-horizon SHAP tree evaluations)
+Total Code Coverage: 75% (74.97% unrounded, enforcing --cov-fail-under=70)
+----------------------------------------------------------------------------------
+Critical Module Coverage Breakdown:
+├── src/config.py                          100%
+├── src/exceptions.py                      100%
+├── src/feature_pipeline/aqi_calculator.py 100%
+├── src/feature_pipeline/feature_eng.py    100%
+├── src/inference/alerting.py               99%
+├── src/feature_pipeline/winter_features.py 99%
+├── src/training_pipeline/cv_evaluator.py   98%
+├── src/feature_pipeline/weather_feat.py    97%
+├── src/training_pipeline/diagnostics.py    97%
+├── src/inference/observation_resolver.py   94%
+├── src/dashboard/components.py             93%
+├── src/models/tensorflow_model.py          93%
+├── src/inference/model_loader.py           92%
+├── src/logger.py                           92%
+├── src/models/random_forest_model.py       91%
+├── src/models/ridge_model.py               91%
+├── src/dashboard/app.py                    90%
+├── src/inference/post_processing.py        89%
+├── src/inference/cache.py                  88%
+├── src/inference/explainer.py              87%
+├── src/inference/runtime_resolver.py       86%
+├── src/api/routes.py                       83%
+├── src/models/lightgbm_models.py           80%
+├── src/inference/predictor.py              80%
+└── src/dashboard/data_client.py            79%
+==================================================================================
+```
+
+All CI workflow runs execute tests in isolated environments with external cloud dependencies 100% mocked.
+
+---
+
+## 19. Production Hardening & Clean-Clone Verification
+
+To guarantee that the system executes deterministically across bare environments and cloud containers, comprehensive production-hardening protocols were implemented:
+
+### 19.1 Clean-Clone Verification
+A clean-clone test was executed in an isolated temporary directory completely devoid of untracked local developer files:
+1.  Cloned repository cleanly; confirmed that `.env`, `data/models/`, `data/processed/`, `data/raw/`, and `data/logs/` were completely absent.
+2.  Booted Flask WSGI using solely committed `data/runtime/` production assets.
+3.  Executed live endpoint assertions:
+    *   `GET /api/health` $	o$ HTTP 200 OK (`service_ready: true`, `model_id: "EXP-019"`).
+    *   `GET /api/current` $	o$ HTTP 200 OK (returns valid observation schema, current AQI, stale telemetry indicator).
+    *   `GET /api/forecast` $	o$ HTTP 200 OK (72 horizons anchored to physical observation origin $T$, empirical prediction error intervals).
+    *   `GET /api/model/info` $	o$ HTTP 200 OK (`EXP-019`, 114 features, $R^2$ 0.4858).
+    *   `GET /api/explain?horizon=24` $	o$ HTTP 200 OK (mathematical additivity error $< 10^{-6}$).
+
+### 19.2 Runtime Asset Resolver & Fail-Closed Integrity
+`RuntimeAssetResolver` (`src/inference/runtime_resolver.py`) enforces strict cryptographic and schema validation on startup:
+*   **Cryptographic SHA-256 Checksums**: Validates all runtime files against `manifest.json`. Any byte modification or file tampering raises an immediate `ValidationError` and fails closed with HTTP 503.
+*   **Model-Explainer Binding**: `explainer_manifest.json` binds the exact SHA-256 hashes of the model, schema, and background matrix, preventing explainability drift.
+*   **Bootstrap Schema Binding**: `latest_feature_vector.json` encodes `schema_sha256`, which must match the active production schema.
+*   **Finite Numeric Enforcement**: Verifies that all 114 features are present in canonical order and rejects non-finite numeric entries (`NaN`, `Infinity`, `-Infinity`).
+*   **Timestamp Parsing**: Strictly validates ISO 8601 UTC timestamps.
+
+### 19.3 Cross-Platform Line-Ending Normalization
+On Windows, Git checked out JSON files with CRLF (`\r\n`), whereas Linux (Render/CI) checked them out with LF (`\n`). This caused SHA-256 checksum mismatches on text configuration files during boot.
+*   **Resolution**: Added `.gitattributes` enforcing `*.json text eol=lf` and updated `compute_file_sha256` in `src/inference/runtime_resolver.py` to normalize JSON text to LF before hashing.
+
+### 19.4 Dependency Isolation
+Dependencies are segregated into distinct requirement files to optimize container build times and memory footprints:
+*   `requirements.txt`: Production runtime dependencies for Flask/Gunicorn.
+*   `requirements-dev.txt`: Development and testing dependencies (pytest, pytest-cov).
+*   `requirements-feature-pipeline.txt`: Hopsworks and streaming dependencies (`hopsworks[python]==5.0.6`, `confluent-kafka`, `pyarrow`).
+*   `src/dashboard/requirements.txt`: Lightweight UI subset (~40 MB footprint) for Streamlit Community Cloud.
+
+---
+
+## 20. Comprehensive Challenges and Debugging
+
+Engineering an end-to-end forecasting system uncovered numerous analytical and operational hurdles:
+
+### 1. The Model Complexity Paradox
+*   **Problem**: Initial hypothesis assumed non-linear tree ensembles and deep neural networks would outperform linear baselines.
+*   **Investigation**: Random Forest achieved RMSE 89.18 (losing to zero-parameter Naive Persistence at 85.35), while TensorFlow DNN achieved RMSE 85.01.
+*   **Resolution**: Regularized linear models (Ridge $\alpha=1.0$) provided superior multi-step stability on tabular time-series with collinear predictors. LightGBM was isolated strictly to short horizons ($h1..6$).
+*   **Result**: Hybrid architecture (EXP-019) achieved champion RMSE of 75.91.
+
+### 2. Temporal Distribution Shift
+*   **Problem**: Aggregate test metrics masked severe seasonal failure modes.
+*   **Investigation**: Seasonal error segmentation and Wasserstein distance analysis revealed errors were concentrated in the winter smog regime.
+*   **Resolution**: Walk-forward validation across 4 seasonal folds was instituted to evaluate models across distinct climatological regimes.
+*   **Result**: Identified regime-specific error profiles (Winter RMSE 85–104 vs Summer RMSE 71–72).
+
+### 3. Winter Feature Ablation Rejection
+*   **Problem**: Hypothesized that surface winter proxies (fog proxy, inversion index) would reduce winter error.
+*   **Investigation**: Evaluated 6 ablation configurations across 4 walk-forward folds; mean RMSE improved by only 0.11 points ($83.44 \to 83.33$).
+*   **Resolution**: Followed strict software engineering principles; rejected the added feature complexity since statistical gains were negligible.
+*   **Result**: Preserved canonical 114-column feature space and documented the need for vertical atmospheric data.
+
+### 4. Canonical Feature Count & Predictor Reconciliation
+*   **Problem**: Confusion between 114 stored columns and 113 fitted regressors.
+*   **Investigation**: `dt` is an integral timestamp necessary for temporal ordering and provenance, but using it as a linear regressor causes temporal overfitting.
+*   **Resolution**: Standardized terminology: 114 canonical production model-input columns received by the frozen scaler and model; 113 fitted predictors when `dt` is excluded during walk-forward and candidate training.
+*   **Result**: Exact schema parity across scaler, model, Hopsworks feature group, and inference resolver.
+
+### 5. Observation Timestamp Semantics
+*   **Problem**: Early API iterations anchored forecast horizons to request generation time (`generated_at`).
+*   **Investigation**: Network delays or stale caches caused forecast horizon timestamps to drift away from physical observation times.
+*   **Resolution**: Anchored `forecast_origin` strictly to `input_observed_at`.
+*   **Result**: Forecast trajectories represent true physical time steps ($T+1\text{h} \dots T+72\text{h}$).
+
+### 6. Serialized Hybrid Blend Weight State
+*   **Problem**: Hybrid model class constructor defaulted to `min_blend_weight=0.6`, whereas EXP-019 was serialized with `0.7`.
+*   **Investigation**: Re-instantiating the class without deserializing saved attributes loaded the constructor default.
+*   **Resolution**: Updated `load()` method to extract the serialized `min_blend_weight` and dynamically reconstruct the 35-step decay array.
+*   **Result**: Exact mathematical prediction parity verified across development, CI, and production.
+
+### 7. SHAP Dependency Compatibility
+*   **Problem**: `shap>=0.50` required Python 3.11+, conflicting with Python 3.10 deployment environments.
+*   **Investigation**: Dependency resolver failed during deployment builds.
+*   **Resolution**: Pinned `shap==0.49.1` in production requirements.
+*   **Result**: Stable explainability generation on Python 3.10.
+
+### 8. GitHub Actions Runner Ephemerality
+*   **Problem**: Generated evaluation reports and artifacts disappeared when runner jobs concluded.
+*   **Investigation**: GitHub Actions runners are ephemeral containers that destroy local filesystems on completion.
+*   **Resolution**: Added `actions/upload-artifact@v4` steps with explicit retention policies (7–14 days).
+*   **Result**: Persistent, auditable CI/CD and training evaluation artifacts.
+
+### 9. Hopsworks Streaming Kafka Writes vs Asynchronous Offline Materialization
+*   **Problem**: Synchronous feature store writes blocked waiting for offline Spark materialization jobs (10–15 minutes), causing CI timeouts.
+*   **Investigation**: Online-enabled Hopsworks feature groups write synchronously to RonDB via Kafka in ~2 seconds, while offline Hudi materialization runs asynchronously.
+*   **Resolution**: Configured `wait_for_job=False` / `wait=False` for offline storage in automated pipelines.
+*   **Result**: Live feature pipeline workflow execution time reduced to 43–76 seconds.
+
+### 10. Clean-Clone Runtime Asset Absence
+*   **Problem**: Cloud servers building from clean Git checkouts crashed because `data/models/` was gitignored.
+*   **Investigation**: Deployment platforms have no access to untracked local developer directories.
+*   **Resolution**: Created versioned `data/runtime/` package with explicit `.gitignore` whitelist rules (`!data/runtime/**`).
+*   **Result**: Clean clones boot deterministically without manual file transfers.
+
+### 11. Initial Live Cloud Feature Store State
+*   **Problem**: Live Hopsworks instance initially contained zero feature groups and zero registered models.
+*   **Investigation**: Development had utilized mock integration tests prior to cloud provisioning.
+*   **Resolution**: Seeded production feature group `aqi_weather_features_v2` (v1) with historical observations (verified audit snapshot: 48,718 rows through Sep 7) and registered `pearls_aqi_production_champion` (v1).
+*   **Result**: Fully populated cloud feature store and model registry.
+
+### 12. Inability of Point Observations to Reconstruct Lookback Windows
+*   **Problem**: Naive approach attempted to fetch a single current API reading on boot to generate forecasts.
+*   **Investigation**: EXP-019 requires 24-hour backward lag and rolling features that cannot be computed from a single instantaneous reading.
+*   **Resolution**: Live pipeline ingests 72-hour historical windows; cold-start boot utilizes committed canonical bootstrap vector.
+*   **Result**: Cold starts succeed immediately without feature distortion.
+
+### 13. Frontend Heavy Dependency Bloat
+*   **Problem**: Streamlit Cloud build failed when `data_client.py` imported `AQIPredictor`, pulling in `scikit-learn`, `lightgbm`, and `shap`.
+*   **Investigation**: Unused local fallback code caused frontend container to install heavy ML frameworks.
+*   **Resolution**: Lazy-imported `AQIPredictor` inside fallback branch, configured `ENABLE_LOCAL_FALLBACK=false`, and created lightweight `src/dashboard/requirements.txt` (~40 MB).
+*   **Result**: Streamlit Cloud container deploys in seconds.
+
+### 14. Render Memory Allocation & Concurrency Sizing
+*   **Problem**: Multi-worker Gunicorn configuration risked Out-Of-Memory termination on Render Free tier (512 MB).
+*   **Investigation**: Continuous 5ms sampling showed baseline memory of ~178 MB with transient SHAP peaks reaching 360.81 MB, establishing that a single worker (`--workers 1`) is the safest operational baseline.
+*   **Resolution**: In the production Blueprint (`render.yaml`), Gunicorn is configured with `-w 2` (`gunicorn -w 2 -b 0.0.0.0:$PORT src.api.app:app`) to handle request concurrency. However, concurrent execution of multiple heavy SHAP evaluations could potentially duplicate transient memory allocations and approach the 512 MB threshold; multi-worker concurrency under continuous heavy load remains an operational capacity risk that should be monitored.
+*   **Result**: Functional WSGI serving with monitored memory boundaries.
+
+### 15. Render Python Version & Build Timeouts
+*   **Problem**: Render defaulted to Python 3.14 without binary wheels, triggering 19+ minute C++ source compilations.
+*   **Investigation**: Build logs showed pip compiling `grpcio` and `google-pasta` from source.
+*   **Resolution**: Pinned Python `3.10.14` via `.python-version` and separated runtime requirements from developer tools.
+*   **Result**: Render build completed in under 45 seconds using pre-compiled wheels.
+
+### 16. WSGI Start Command Shell Parsing
+*   **Problem**: Start command `gunicorn "src.api.app:create_app()"` failed on Linux with status 2.
+*   **Investigation**: Linux shell parsed parentheses as subshell operators.
+*   **Resolution**: Exported module-level `app = create_app()` and updated start command to `src.api.app:app`.
+*   **Result**: Clean Gunicorn WSGI startup on Linux.
+
+### 17. Cross-Platform CRLF vs LF Line-Ending Hashes
+*   **Problem**: SHA256 checksum of `feature_schema_v2_weather.json` mismatched between Windows development and Render Linux.
+*   **Investigation**: Windows Git checked out files with CRLF (`\r\n`), altering file hashes.
+*   **Resolution**: Added `.gitattributes` enforcing `*.json text eol=lf` and updated runtime resolver to normalize JSON text before hashing.
+*   **Result**: SHA256 checksums match identically across Windows and Linux.
+
+### 18. Clean CI Empty Directory Structure
+*   **Problem**: Tests failed in CI runners because Git does not track empty directories (`data/raw/`, `data/processed/`).
+*   **Investigation**: File handlers threw `FileNotFoundError` when attempting to write logs or temp files.
+*   **Resolution**: Added tracked `.gitkeep` files across all required directories.
+*   **Result**: CI test runner executes cleanly on fresh clones.
+
+### 19. GitHub Native Scheduled Workflow Reliability Gaps
+*   **Problem**: Expected hourly schedule-triggered GitHub Actions executions on cron `17 * * * *` exhibited multi-hour gaps during live monitoring.
+*   **Investigation**: GitHub documentation notes that scheduled workflows are executed on a best-effort basis and that delays or dropped jobs can occur during periods of high platform load.
+*   **Resolution**: Implemented `repository_dispatch` trigger (`event_type: hourly_ingest`) and configured an independent Render Cron Job (`aqi-hourly-ingest-trigger` at `15 * * * *` UTC) using `trigger_dispatch.py` to dispatch GitHub Actions externally, keeping native GitHub cron as backup.
+*   **Result**: Resilient dual-trigger scheduling with idempotent ingestion.
+
+### 20. Inability of Frontend Refresh to Generate Upstream Data
+*   **Problem**: Users clicking "Refresh" on the dashboard expected newly ingested physical data when upstream pipelines had not run.
+*   **Investigation**: Frontend refresh intentionally does not launch upstream ingestion because triggering live provider calls and feature store writes on user web requests would unacceptably couple presentation traffic to external provider latency, rate limits, write locks, and backend credentials.
+*   **Resolution**: Stale-data warning banners transparently display observation age and explain when telemetry is historical.
+*   **Result**: Honest, transparent data freshness communication.
+
+### 21. Rejection of In-Process Flask Scheduler Daemon
+*   **Problem**: Running an in-process background thread scheduler (`run_scheduler_daemon()`) inside `src/api/app.py` was initially considered for hourly dispatches.
+*   **Investigation**: On Render Free tier, web services spin down after 15 minutes of inactivity, terminating background threads. Furthermore, scheduler lifecycle was coupled to Gunicorn worker restarts.
+*   **Resolution**: Removed in-process scheduler daemon from Flask; returned Flask to a purely stateless REST service; deployed dedicated Render Cron Job.
+*   **Result**: Independent scheduler execution decoupled from web traffic and worker restarts.
+
+### 22. Standalone Zero-Dependency Dispatcher for Cron Jobs
+*   **Problem**: Running `python -m src.feature_pipeline.scheduler --dispatch-now` in the Render Cron container failed with `ModuleNotFoundError: No module named 'numpy'`.
+*   **Investigation**: `src/feature_pipeline/__init__.py` imported modules requiring numpy, but the cron container needed only standard HTTP dispatch capabilities.
+*   **Resolution**: Created standalone `trigger_dispatch.py` using Python standard library (`urllib.request`, `json`, `os`, `sys`) with zero external dependencies, configured as the `startCommand` in `render.yaml`.
+*   **Result**: Cron job executes in $<1$ second with zero package installation overhead.
+
+### 23. Backend URL Migration to Blueprint Service
+*   **Problem**: Migration to Render Blueprint provisioned web service `aqi-forecasting-api`, superseding legacy URL `aqi-forecasting-xyyb`.
+*   **Investigation**: Streamlit frontend configuration needed to be synchronized with the new Blueprint service endpoint.
+*   **Resolution**: Updated frontend configuration to `FLASK_API_URL = "https://aqi-forecasting-api.onrender.com/api"` and updated repository documentation.
+*   **Result**: Live frontend communicates with active Blueprint REST backend.
+
+---
+
+## 21. Architectural Design Decisions
+
+Key design choices governing the system:
+
+1.  **Targeting US EPA AQI**: Predicting the standard 0–500 EPA AQI scale provides direct public health utility compared to raw pollutant concentrations.
+2.  **72-Hour Continuous Horizon**: 3-day forecast window balances predictive capability with actionable planning lead-time.
+3.  **Chronological Splitting with Embargo**: Enforcing strict temporal embargoes ($>72\text{h}$) prevents data leakage in sequential forecasting.
+4.  **Hybrid Modeling Strategy**: Combining LightGBM for non-linear short-term transitions ($h1..6$), Ridge Regression for mid-range stability ($h7..37$), and Persistence Blending for long-range regularization ($h38..72$) achieved the lowest aggregate error.
+5.  **Empirical Residual Uncertainty**: Quantile-based residual intervals ($Q_{0.10}$ to $Q_{0.90}$) provide realistic, non-parametric uncertainty bounds without assuming Gaussian errors.
+6.  **Observation-Anchored Forecasting**: Anchoring forecast origin strictly to physical observation timestamps ensures temporal integrity regardless of network latency.
+7.  **Fail-Closed Runtime Integrity**: Cryptographic SHA256 verification of models, scalers, and schemas on startup prevents silent execution of corrupted artifacts.
+8.  **Decoupled Frontend & Backend**: Strict physical separation allows independent deployment, optimizes memory footprints, and protects backend credentials.
+
+---
+
+## 22. Lessons Learned
+
+1.  **Complexity vs Simplicity**: Complex architectures (Random Forests, Deep Neural Networks) do not automatically outperform simple linear models on noisy time-series data. Regularized linear regression remains a strong baseline.
+2.  **Data Engineering over Model Tuning**: Adding meteorological features (expanding from 64 to 114 features) produced a significantly larger performance improvement (RMSE $82.97 \to 78.38$) than extensive hyperparameter tuning on pollutant-only data.
+3.  **Importance of Walk-Forward Validation**: Single-split benchmarks can mask regime-specific degradation. Walk-forward testing revealed that winter smog forecasting is fundamentally more difficult than summer forecasting.
+4.  **Surface Data Limitations**: Tested surface-level weather proxy features yielded negligible incremental benefit in the winter smog ablation study, suggesting that richer vertical atmospheric profiles (such as Planetary Boundary Layer height and vertical temperature lapse rates) and satellite-derived emission telemetry may be necessary for additional forecasting gains.
+5.  **Production Discipline**: Transitioning from experimental code to deployed software requires strict dependency isolation, clean-clone validation, fail-closed runtime checks, and automated CI test gates.
+
+---
+
+## 23. Future Work
+
+*   **Vertical Atmospheric Profiling**: Incorporating Planetary Boundary Layer (PBL) height and vertical temperature lapse rates to model winter temperature inversions.
+*   **Satellite Emission Telemetry**: Integrating active fire hotspot counts from satellite sensors (MODIS/VIIRS) to capture agricultural crop burning spikes.
+*   **Multi-Station Spatial Ingestion**: Integrating additional monitoring stations (e.g. AQICN network) across Lahore and Punjab to capture spatial dispersion.
+*   **Multi-Season Winter History**: Accumulating additional winter seasons in the Hopsworks feature store to expand training diversity under extreme smog events.
+*   **Automated Model Governance**: Implementing statistically gated, canary-style champion promotion pipelines after establishing formal safety boundaries.
+
+---
+
+## 24. Analytical & Modeling Notebooks
+
+1.  `notebooks/01_api_investigation.ipynb` — OpenWeather API rate limits and response structures.
+2.  `notebooks/02_raw_data_exploration.ipynb` — Historical data ingestion validation.
+3.  `notebooks/03_eda_and_aqi_conversion.ipynb` — EPA AQI conversion and pollutant distributions.
+4.  `notebooks/04_feature_engineering.ipynb` — Temporal, lag, and rolling feature generation.
+5.  `notebooks/05_dataset_preparation.ipynb` — Multi-output target alignment and chronological split.
+6.  `notebooks/06_model_training_ridge.ipynb` — Ridge baseline model training.
+7.  `notebooks/07_model_training_rf.ipynb` — Random Forest regressor evaluation.
+8.  `notebooks/08_model_training_tf.ipynb` — TensorFlow DNN architecture and training.
+9.  `notebooks/09_error_and_distribution_diagnostics.ipynb` — Distribution shift and seasonal error analysis.
+10. `notebooks/10_weather_enrichment.ipynb` — Open-Meteo meteorological feature enrichment.
+11. `notebooks/11_systematic_model_tuning.ipynb` — Cross-validation sweeps and experiment tracking.
+12. `notebooks/12_forecasting_architecture_experiments.ipynb` — Hybrid architecture development.
+13. `notebooks/13_final_test_benchmark.ipynb` — 7-model benchmark on held-out test partition.
+14. `notebooks/14_walk_forward_stability.ipynb` — 4-fold temporal walk-forward validation.
+15. `notebooks/15_winter_smog_ablation.ipynb` — Winter smog feature ablation study.
+
+---
+
+## 25. Live Deployment & Operational Endpoints
+
+### 25.1 Production Endpoints
+*   **Frontend Web Dashboard**: [https://aqi-forecasting.streamlit.app](https://aqi-forecasting.streamlit.app) (Streamlit Community Cloud)
+*   **Backend REST API**: [https://aqi-forecasting-api.onrender.com/api](https://aqi-forecasting-api.onrender.com/api) (Render Web Service)
+
+### 25.2 CORS Configuration
+The Flask REST API is configured via `render.yaml` to permit cross-origin requests from the production dashboard and local development interfaces:
+```yaml
+CORS_ORIGINS: "https://aqi-forecasting.streamlit.app,http://localhost:8501,http://127.0.0.1:8501"
+```
+
+### 25.3 Streamlit Production Configuration
+```toml
+FLASK_API_URL = "https://aqi-forecasting-api.onrender.com/api"
+ENABLE_LOCAL_FALLBACK = "false"
+```
+
+---
+
+## 26. High-Severity & Hazardous AQI Alert System
+
+### 26.1 Centralized Classification Architecture & Single Source of Truth
 The alerting layer was implemented as an authoritative, centralized module in `src/inference/alerting.py`. A core design tenet was eliminating divergent threshold implementations between backend API responses, frontend visualizations, and domain category definitions.
 
 To avoid contradictions between floating-point predictions and integer EPA category breakpoints, the alerting system enforces the single-path pipeline:
@@ -637,11 +851,11 @@ $$\text{numeric AQI} \longrightarrow \text{get\_aqi\_category()} \longrightarrow
 
 Because `get_aqi_category()` rounds raw float AQI values to the nearest integer prior to range evaluation, evaluating alerts directly from the resulting category guarantees that the displayed category, hex color, alert level, and severity rank are mathematically locked across all system interfaces.
 
-### 25.2 Exact Category Boundaries & Severity Mapping
+### 26.2 Exact Category Boundaries & Severity Mapping
 The centralized schema (`CATEGORY_TO_ALERT_CONFIG`) maps each official EPA category to a normalized severity rank (0 to 5) and alert level:
 
-| EPA AQI Range | EPA Category | Alert Level | Severity Rank | Active Alert | Threshold | Official Color |
-| :--- | :--- | :--- | :---: | :---: | :---: | :--- |
+| EPA AQI Range | EPA Category | Alert Level | Severity Rank | Active Alert | Threshold | Official Reference Color |
+| :---: | :--- | :---: | :---: | :---: | :---: | :--- |
 | **0 – 50** | Good | `none` | 0 | False | None | `#00E400` |
 | **51 – 100** | Moderate | `none` | 1 | False | None | `#FFFF00` |
 | **101 – 150** | Unhealthy for Sensitive Groups | `advisory` | 2 | True | 101.0 | `#FF7E00` |
@@ -649,72 +863,125 @@ The centralized schema (`CATEGORY_TO_ALERT_CONFIG`) maps each official EPA categ
 | **201 – 300** | Very Unhealthy | `severe` | 4 | True | 201.0 | `#8F3F97` |
 | **301 – 500+** | Hazardous | `hazardous` | 5 | True | 301.0 | `#7E0023` |
 
+*Color System Note: The table lists standard EPA reference regulatory colors. The redesigned Streamlit UI applies a harmonized frontend design palette optimized for accessibility and contrast in dark/light themes while maintaining strict numerical parity on thresholds.*
+
 Extreme predicted AQI values exceeding 500 are preserved as unclipped floating-point numbers and mapped into the Hazardous tier (severity rank 5).
 
-### 25.3 Current Observation vs Forecast Trajectory Alert Distinction
+### 26.3 Current Observation vs Forecast Trajectory Alert Distinction
 To provide transparent public risk communication, the system strictly distinguishes between *current observed conditions* and *predicted future conditions*:
-* **Current Observations**: Evaluated by `evaluate_current_alert()`, returning:
-  `"Current observed air quality in Lahore is [X] AQI ([Category]). [Category-level health advisory text]"`
-* **Forecast Trajectory**: Evaluated by `evaluate_forecast_alerts()` scanning all 72 horizons, phrasing alerts with scientific calibration:
-  `"The model forecasts [Level] air quality conditions within the next 72 hours (Peak AQI [X] at +[H]h). First enters [Level] range at +[H]h. A total of [N] forecast hours are in the [Level] range."`
+*   **Current Observations**: Evaluated by `evaluate_current_alert()`, returning:
+    `"Current observed air quality in Lahore is [X] AQI ([Category]). [Category-level health advisory text]"`
+*   **Forecast Trajectory**: Evaluated by `evaluate_forecast_alerts()` scanning all 72 horizons, phrasing alerts with scientific calibration:
+    `"The model forecasts [Level] air quality conditions within the next 72 hours (Peak AQI [X] at +[H]h). First enters [Level] range at +[H]h. A total of [N] forecast hours are in the [Level] range."`
 
-This ensures that model predictions are never conflated with observed real-time sensor measurements.
+This ensures that model predictions are never conflated with observed sensor measurements.
 
-### 25.4 Multi-Horizon Scanning: First Threshold Crossings & Horizon Counts
+### 26.4 Multi-Horizon Scanning: First Threshold Crossings & Horizon Counts
 The multi-horizon scanner sequentially examines the 72-hour forecast sequence, capturing:
-* **Peak Event**: `peak_aqi`, `peak_horizon`, `peak_timestamp`, and `peak_category`.
-* **First Crossings**: Captures the earliest horizon and timestamp where the forecast enters or exceeds each severity tier:
-  * `first_advisory_horizon` & `first_advisory_timestamp` ($\text{rank} \ge 2$, AQI $\ge 101$)
-  * `first_unhealthy_horizon` & `first_unhealthy_timestamp` ($\text{rank} \ge 3$, AQI $\ge 151$)
-  * `first_very_unhealthy_horizon` & `first_very_unhealthy_timestamp` ($\text{rank} \ge 4$, AQI $\ge 201$)
-  * `first_hazardous_horizon` & `first_hazardous_timestamp` ($\text{rank} \ge 5$, AQI $\ge 301$)
-* **Category-Specific Counts**: Computes non-overlapping hourly duration counts for each tier:
-  * `advisory_horizon_count` ($\text{rank} == 2$)
-  * `unhealthy_horizon_count` ($\text{rank} == 3$)
-  * `very_unhealthy_horizon_count` ($\text{rank} == 4$)
-  * `hazardous_horizon_count` ($\text{rank} \ge 5$)
-  * `severe_or_higher_horizon_count`: Combined sum of Very Unhealthy and Hazardous hours ($\text{rank} \ge 4$).
+*   **Peak Event**: `peak_aqi`, `peak_horizon`, `peak_timestamp`, and `peak_category`.
+*   **First Crossings**: Captures the earliest horizon and timestamp where the forecast enters or exceeds each severity tier:
+    *   `first_advisory_horizon` & `first_advisory_timestamp` ($\text{rank} \ge 2$, AQI $\ge 101$)
+    *   `first_unhealthy_horizon` & `first_unhealthy_timestamp` ($\text{rank} \ge 3$, AQI $\ge 151$)
+    *   `first_very_unhealthy_horizon` & `first_very_unhealthy_timestamp` ($\text{rank} \ge 4$, AQI $\ge 201$)
+    *   `first_hazardous_horizon` & `first_hazardous_timestamp` ($\text{rank} \ge 5$, AQI $\ge 301$)
+*   **Category-Specific Counts**: Computes non-overlapping hourly duration counts for each tier:
+    *   `advisory_horizon_count` ($\text{rank} == 2$)
+    *   `unhealthy_horizon_count` ($\text{rank} == 3$)
+    *   `very_unhealthy_horizon_count` ($\text{rank} == 4$)
+    *   `hazardous_horizon_count` ($\text{rank} \ge 5$)
+    *   `severe_or_higher_horizon_count`: Combined sum of Very Unhealthy and Hazardous hours ($\text{rank} \ge 4$).
 
-### 25.5 Stale Telemetry and Bootstrap Fallback Handling
+### 26.5 Stale Telemetry and Bootstrap Fallback Handling
 Alert evaluations independently preserve and propagate data provenance:
-* Both `evaluate_current_alert()` and `evaluate_forecast_alerts()` accept `data_is_stale`, `feature_source`, and `fallback_active`.
-* When telemetry is historical ($>3$ hours old), alerts remain numerically valid and categorized, but the system concurrently renders prominent telemetry freshness notices.
-* Dynamic cache refresh updates `data_is_stale` on every cached response, ensuring that aging cached forecasts automatically reflect staleness without requiring re-inference.
+*   Both `evaluate_current_alert()` and `evaluate_forecast_alerts()` accept `data_is_stale`, `feature_source`, and `fallback_active`.
+*   When telemetry is historical ($>3$ hours old), alerts remain numerically valid and categorized, but the system concurrently renders prominent telemetry freshness notices.
+*   Dynamic cache refresh updates `data_is_stale` on every cached response, ensuring that aging cached forecasts automatically reflect staleness without requiring re-inference.
 
-### 25.6 Empirical Upper-Bound Uncertainty Auditing
+### 26.6 Empirical Upper-Bound Uncertainty Auditing
 In addition to point forecasts, the scanner audits the 90th percentile empirical prediction error upper bounds (`error_upper` derived from walk-forward residual quantiles):
-* If `error_upper >= 301.0` at any horizon while the expected point forecast remains below Very Unhealthy ($<201$), `upper_interval_crosses_hazardous` is set to `True`.
-* The dashboard displays an uncertainty notice:
-  `"Uncertainty Notice: The 90th percentile empirical error interval crosses the Hazardous threshold (>300 AQI) at one or more horizons, indicating extreme air pollution tail risk. Monitor ongoing hourly telemetry updates."`
+*   If `error_upper >= 301.0` at any horizon while the expected point forecast remains below Very Unhealthy ($<201$), `upper_interval_crosses_hazardous` is set to `True`.
+*   The dashboard displays an uncertainty notice:
+    `"Uncertainty Notice: The 90th percentile empirical error interval crosses the Hazardous threshold (>300 AQI) at one or more horizons, indicating extreme air pollution tail risk. Monitor ongoing hourly telemetry updates."`
 
-### 25.7 REST API Contract Integration
+### 26.7 REST API Contract Integration
 The Flask API incorporates the alert contract without route proliferation:
-* **`GET /api/current`**: Enriched with `alert_level`, `severity_rank`, and the complete `alert` dictionary.
-* **`GET /api/forecast`**: Enriched with `forecast_alert` at the root response level and within `summary`, while each point in `forecasts` includes `alert_level` and `severity_rank`.
-* **Legacy Backward Compatibility**: Retains `high_severity` ($>200$), `hazardous` ($>300$), `has_high_severity`, `has_hazardous`, and `highest_alert_level` to ensure existing API consumers experience zero breaking changes.
+*   **`GET /api/current`**: Enriched with `alert_level`, `severity_rank`, and the complete `alert` dictionary.
+*   **`GET /api/forecast`**: Enriched with `forecast_alert` at the root response level and within `summary`, while each point in `forecasts` includes `alert_level` and `severity_rank`.
+*   **Legacy Backward Compatibility**: Retains `high_severity` ($>200$), `hazardous` ($>300$), `has_high_severity`, `has_hazardous`, and `highest_alert_level` to ensure existing API consumers experience zero breaking changes.
 
-### 25.8 Streamlit Dashboard Integration
-* **Prioritized Top-Level Banners (`render_alert_banners`)**:
-  1. Current Severe / Hazardous emergency banner (`st.error`)
-  2. Forecast Severe / Hazardous trajectory banner (`st.error`)
-  3. Stale telemetry notice (`st.warning`, displayed alongside severe alerts when data is historical)
-  4. Unhealthy warning / Advisory banners (`st.warning` / `st.info`)
-  5. Empirical error upper bound tail risk notice (`st.info`)
-* **Sidebar Integration (`render_sidebar`)**: Synchronized to consume `summary["forecast_alert"]`, displaying color-coded status badges and first-crossing horizon offsets.
-* **Interactive Chart Reference Lines**: `build_forecast_figure` renders dashed horizontal lines at exact EPA boundaries: `151` (Unhealthy, red), `201` (Very Unhealthy, purple), and `301` (Hazardous, maroon).
+### 26.8 Streamlit Dashboard Integration
+*   **Prioritized Top-Level Banners (`render_alert_banners`)**:
+    1.  Current Severe / Hazardous emergency banner (`st.error`)
+    2.  Forecast Severe / Hazardous trajectory banner (`st.error`)
+    3.  Stale telemetry notice (`st.warning`, displayed alongside severe alerts when data is historical)
+    4.  Unhealthy warning / Advisory banners (`st.warning` / `st.info`)
+    5.  Empirical error upper bound tail risk notice (`st.info`)
+*   **Interactive Chart Reference Lines**: `build_forecast_figure` renders dashed horizontal lines at exact EPA boundaries: `151` (Unhealthy, red), `201` (Very Unhealthy, purple), and `301` (Hazardous, maroon).
 
-### 25.9 Automated Test Suite & Coverage
-The test suite was expanded with 41 new unit and regression tests:
-* `tests/test_alerting.py` (33 tests, 99% coverage): Boundary testing across 0..650 AQI, float rounding, sequence simulations, and provenance flags.
-* `tests/test_dashboard_alerts.py` (7 tests): Banner hierarchy, sidebar rendering, and 151/201/301 reference line verification.
-* `tests/test_dashboard.py` (17 tests): Full component rendering, app regression test verifying `observed_at` and `forecast_origin` fallback resolution without `NameError`.
-* **Overall Suite**: **459 passed tests** across 35 test modules, achieving **74.00% total code coverage**.
+### 26.9 Automated Alert Testing & Validation Suite
+The alerting layer is protected by a dedicated regression testing suite:
+*   `tests/test_alerting.py` (33 unit tests, 99% module coverage): Validates boundary transitions across 0 to 650 AQI, floating-point rounding parity, sequence simulations, severity rank assertions, and provenance flag propagation.
+*   `tests/test_dashboard_alerts.py` (7 tests): Tests alert banner priority hierarchy, sidebar status rendering, and reference threshold lines.
+*   `tests/test_dashboard.py` (17 tests): Tests component rendering, layout composition, and graceful error presentation.
 
-### 25.10 Production Verification & Immutability Audit
-* **Live Render API (`https://aqi-forecasting-xyyb.onrender.com/api`)**: Verified live `/api/health` (healthy), `/api/current` (returns `alert` with live Hopsworks provenance), `/api/forecast` (returns `forecast_alert` with 58 Unhealthy hours, first at +6h), `/api/model/info` (EXP-019), and `/api/explain?horizon=24`.
-* **Live Streamlit App (`https://aqi-forecasting.streamlit.app`)**: Verified live HTTP 200 and script execution without runtime exceptions.
-* **Asset Immutability**: All 4 authoritative production assets in `data/runtime/production/` verified 100% byte-for-byte identical (`production_hybrid_model.joblib`: `F51D2EFF...`, `feature_scaler_v2_weather.joblib`: `9CE7E9FC...`, `feature_schema_v2_weather.json`: `38A5FDEA...`, `empirical_error_intervals.json`: `DBA4571E...`).
-* **Model Registry Audit**: Hopsworks registry `pearls_aqi_production_champion` verified with exactly 1 version (`version 1`, ID `pearls_aqi_production_champion_1`) and 0 candidate models.
+---
 
+## 27. Comprehensive Project Requirements Compliance Matrix
 
+The table below maps the complete project implementation against all requirements in the original project specification:
 
+| Requirement Area | Specification / Expectation | Implementation Status | Evidence / Verification |
+| :--- | :--- | :---: | :--- |
+| **Language & Core Frameworks** | Python 3.10+, Scikit-learn, LightGBM, TensorFlow | **COMPLIANT ✅** | EXP-019 hybrid model, DNN baseline, full scikit-learn preprocessing pipeline |
+| **Raw External Ingestion** | OpenWeather Air Pollution & Open-Meteo Weather APIs | **COMPLIANT ✅** | `src/data_ingestion/` with atomic writes, exponential retry, and data validation |
+| **Feature Engineering** | Lags, rolling aggregates, cyclical signals, ratios, weather | **COMPLIANT ✅** | 114 canonical model-input columns; exact schema in `feature_schema_v2_weather.json` |
+| **Exploratory Data Analysis** | In-depth EDA notebooks, distributions, correlations | **COMPLIANT ✅** | 15 notebooks covering EDA, diagnostics, tuning, benchmarking, and ablations |
+| **Historical Data Backfill** | Multi-year historical data ingestion and storage | **COMPLIANT ✅** | `src/feature_pipeline/backfill.py` retrieving history from Nov 2020 to present |
+| **Feature Store Integration** | Hopsworks Feature Store integration | **COMPLIANT ✅** | `aqi_weather_features_v2` (v1, ID 52526), 48,718 offline records (Sep 7 audit snapshot), RonDB online store |
+| **Feature-Store Training** | Direct model training from offline Feature Store | **COMPLIANT ✅** | `src/training_pipeline/dataset_builder.py` querying offline Hudi store via Arrow Flight |
+| **Multiple ML Experiments** | Ridge, Random Forest, Deep Neural Network, LightGBM, Hybrid | **COMPLIANT ✅** | Experiments EXP-001 through EXP-019 tracked across linear, tree, DNN, and hybrid families |
+| **Model Evaluation** | Multi-metric evaluation (RMSE, MAE, $R^2$, horizon limits) | **COMPLIANT ✅** | Evaluated across 72 horizons with walk-forward validation and out-of-time test benchmarks |
+| **Forecast Horizon** | 72 continuous hourly predictions (3-day forecast window) | **COMPLIANT ✅** | Multi-output $h=1..72$ sequence anchored to physical observation timestamp $T$ |
+| **Model Registry** | Cloud model registry registration and provenance tracking | **COMPLIANT ✅** | Hopsworks Model Registry `pearls_aqi_production_champion` (v1, ID `pearls_aqi_production_champion_1`) |
+| **Daily Candidate Retraining** | Automated candidate training from Feature Store | **COMPLIANT ✅** | GitHub Actions workflow (`training_pipeline.yml` at `45 2 * * *` UTC), candidate Ridge +28.20% gain |
+| **Web REST API** | Flask REST API serving predictions, health, and metadata | **COMPLIANT ✅** | 5 Blueprint endpoints (`/health`, `/current`, `/forecast`, `/model/info`, `/explain`) on Render |
+| **Interactive Dashboard** | Streamlit web UI with interactive charts and alerts | **COMPLIANT ✅** | Streamlit Community Cloud app with Plotly trajectories, hero gauge, and SHAP explorer |
+| **Explainable AI** | Model interpretability via SHAP attributions | **COMPLIANT ✅** | Exact mathematical decomposition for hybrid model; `/api/explain` endpoint and UI explorer |
+| **Hazardous AQI Alerts** | Public health alerting and extreme event tracking | **COMPLIANT ✅** | Centralized alerting engine with multi-horizon scanning, first crossings, and tail risk notices |
+| **Version Control & CI/CD** | Git repository hygiene, automated testing, coverage gates | **COMPLIANT ✅** | GitHub Actions CI workflow enforcing 70% coverage gate (**540 passed tests, 75% coverage**) |
+| **Hourly Ingestion Automation** | Independent hourly scheduler calling GitHub Actions | **OPERATIONAL VERIFICATION IN PROGRESS 🔄** | Render Cron Job (`aqi-hourly-ingest-trigger`, `15 * * * *` UTC) configured; initial triggered execution verified; multi-cycle scheduled cadence logging in progress |
+| **100% Serverless Architecture** | Original educational specification | **PARTIAL / TERMINOLOGY CAVEAT ⚠️** | Zero self-managed infrastructure intent is satisfied via managed platforms (Streamlit Cloud, Render, GitHub Actions, Hopsworks). However, Render WSGI web service is a managed container rather than a strict FaaS architecture. |
+
+---
+
+## 28. Authoritative Production Hashes & Asset Integrity
+
+The production system enforces fail-closed cryptographic verification of all runtime assets in `data/runtime/production/`:
+
+```text
+================================ Authoritative Production SHA-256 Hashes ================================
+Asset File                              Exact Cryptographic SHA-256 Checksum
+---------------------------------------------------------------------------------------------------------
+production_hybrid_model.joblib          f51d2eff53b8eadaf7ddb615f1dc76aeed30526038c79cc68ae758e52d8412ee
+feature_scaler_v2_weather.joblib        9ce7e9fcc4fe65c2ac3b52c48c1215622112c9e3827d2c42d9d2c36fa246f063
+feature_schema_v2_weather.json          38a5fdea89b0c5ed9b4e233ab1c46de1837a4dccdfccf77e58b74d06d5348538
+empirical_error_intervals.json          dba4571ebe0599aac7cef8c8982e88b7a7b6f5d656eeb318de960f40483dab83
+=========================================================================================================
+```
+
+### Verified Verification Environments
+*   **Local Repository Disk**: Hashed directly on disk in `data/runtime/production/` using SHA-256.
+*   **Continuous Integration Runners**: Pre- and post-execution checksum assertions execute in `.github/workflows/training_pipeline.yml`.
+*   **Model Registry Parity Verification**: Clean-download parity tests (`python -m src.inference.hopsworks_registry --all`) verify exact checksum equality with live registered assets.
+
+---
+
+## 29. Conclusion and Final System Status
+
+The Pearls AQI Predictor project delivers an end-to-end, automated air quality forecasting and MLOps system for Lahore, Pakistan.
+
+### Final Verification Status
+*   **Core Forecasting & MLOps Pipeline**: **COMPLETE & OPERATIONAL ✅** (EXP-019 hybrid champion, Hopsworks Feature Store & Model Registry, Flask Blueprint REST API, Streamlit Cloud dashboard, centralized alert system, 540 automated tests with 75% coverage).
+*   **Asset & Governance Integrity**: **VERIFIED & FROZEN ✅** (authoritative SHA-256 hashes locked, zero candidate auto-promotions, candidate isolation enforced).
+*   **Hourly Trigger Automation**: **OPERATIONAL VERIFICATION IN PROGRESS 🔄** (independent Render Cron Job configured at `15 * * * *` UTC, zero-dependency dispatcher verified, multi-cycle scheduled cadence observation ongoing).
+*   **Primary Scientific Limitation**: The winter smog season (November–February) remains significantly more difficult to forecast (RMSE 85–104) than summer/monsoon periods (RMSE 71–72). The winter ablation study demonstrated that surface-level weather proxies provide negligible incremental benefit, indicating that future forecasting breakthroughs will require vertical atmospheric profiles (Planetary Boundary Layer dynamics, lapse rates) and satellite-derived agricultural fire emissions.
