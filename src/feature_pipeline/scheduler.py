@@ -110,3 +110,71 @@ def run_scheduled_iteration(
 
     logger.info("Executing canonical hourly ingestion pipeline via local/direct runner...")
     return run_hourly_pipeline(live=True, dry_run=False)
+
+
+def run_scheduler_daemon(target_minute: int = 15, poll_interval_sec: int = 30) -> None:
+    """Run an always-running hourly scheduler daemon that triggers at target_minute.
+
+    Args:
+        target_minute: Minute of the hour to trigger (default: 15).
+        poll_interval_sec: Polling interval in seconds to check system clock.
+    """
+    import threading
+    logger.info(f"Starting hourly scheduler daemon (target: minute :{target_minute:02d})...")
+    last_executed_hour: int | None = None
+
+    while True:
+        now = datetime.now(timezone.utc)
+        current_hour = now.hour
+        current_minute = now.minute
+
+        if current_minute == target_minute and last_executed_hour != current_hour:
+            logger.info(f"Scheduler daemon alarm triggered at {now.isoformat()} (hour {current_hour}, min {current_minute})")
+            try:
+                result = run_scheduled_iteration()
+                logger.info(f"Scheduled iteration completed: {result.get('status', 'unknown')}")
+                last_executed_hour = current_hour
+            except Exception as e:
+                logger.error(f"Scheduler daemon iteration encountered error: {e}", exc_info=True)
+
+        time.sleep(poll_interval_sec)
+
+
+def start_background_scheduler(target_minute: int = 15) -> Any:
+    """Start the hourly scheduler daemon in a background daemon thread.
+
+    Args:
+        target_minute: Minute of the hour to trigger (default: 15).
+
+    Returns:
+        The started Thread instance.
+    """
+    import threading
+    thread = threading.Thread(
+        target=run_scheduler_daemon,
+        args=(target_minute,),
+        daemon=True,
+        name="Pearls-Hourly-Scheduler-Thread",
+    )
+    thread.start()
+    logger.info(f"Launched background scheduler thread (target minute :{target_minute:02d}).")
+    return thread
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Pearls Independent Hourly Scheduler")
+    parser.add_argument("--daemon", action="store_true", help="Run continuously in background daemon loop")
+    parser.add_argument("--minute", type=int, default=15, help="Minute of the hour to trigger (default: 15)")
+    parser.add_argument("--dispatch-now", action="store_true", help="Execute single dispatch immediately")
+    args = parser.parse_args()
+
+    if args.dispatch_now:
+        res = run_scheduled_iteration()
+        print(res)
+    elif args.daemon:
+        run_scheduler_daemon(target_minute=args.minute)
+    else:
+        res = run_scheduled_iteration()
+        print(res)
+

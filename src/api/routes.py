@@ -205,3 +205,27 @@ def get_model_explanation() -> Any:
         raise ServiceUnavailable("Failed to generate model explanation.") from e
 
 
+@api_bp.route("/trigger-ingest", methods=["POST"])
+def trigger_ingest() -> Any:
+    """Trigger an hourly feature ingestion run via GitHub repository_dispatch or fallback.
+
+    Accepts optional authorization token via X-Trigger-Token or Authorization header.
+
+    Returns:
+        200 OK JSON summarizing the dispatch or execution result.
+    """
+    token = (
+        request.headers.get("X-Trigger-Token")
+        or request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        or None
+    )
+    try:
+        from src.feature_pipeline.scheduler import run_scheduled_iteration
+        result = run_scheduled_iteration(github_token=token if token and token.startswith("gh") else None)
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Ingest trigger execution failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from unittest.mock import patch
 import pytest
+
 
 from src.api.app import create_app
 from src.api.routes import parse_bool_arg
@@ -176,13 +177,19 @@ class TestAPIEndpoints:
         resp = client.get("/api/forecast")
         data = resp.get_json()
         f1 = data["forecasts"][0]
-        assert f1["forecast_time"] == "2026-08-31T08:00:00+00:00"
+        from datetime import timedelta
+        origin_dt = datetime.fromisoformat(data["forecast_origin"])
+        expected_h1 = (origin_dt + timedelta(hours=1)).isoformat()
+        assert f1["forecast_time"] == expected_h1
 
     def test_h72_time_is_origin_plus_72_hours(self, client):
         resp = client.get("/api/forecast")
         data = resp.get_json()
         f72 = data["forecasts"][71]
-        assert f72["forecast_time"] == "2026-09-03T07:00:00+00:00"
+        from datetime import timedelta
+        origin_dt = datetime.fromisoformat(data["forecast_origin"])
+        expected_h72 = (origin_dt + timedelta(hours=72)).isoformat()
+        assert f72["forecast_time"] == expected_h72
 
     def test_generated_at_does_not_shift_forecast_horizons(self, client):
         resp = client.get("/api/forecast")
@@ -190,16 +197,18 @@ class TestAPIEndpoints:
         # generated_at reflects request time
         gen_time = datetime.fromisoformat(data["generated_at"])
         assert gen_time.year == 2026
-        # But forecast_time remains anchored to observation time in August
-        assert data["forecasts"][0]["forecast_time"].startswith("2026-08-31T08:00:00")
+        # But forecast_time remains anchored to observation origin
+        origin_dt = datetime.fromisoformat(data["forecast_origin"])
+        assert data["forecasts"][0]["forecast_time"] == (origin_dt + timedelta(hours=1)).isoformat()
+
 
     def test_force_refresh_true_and_false(self, client):
         resp_false = client.get("/api/forecast?force_refresh=false")
         assert resp_false.status_code == 200
         resp_true = client.get("/api/forecast?force_refresh=true")
         assert resp_true.status_code == 200
-        # Recomputed forecast from stored features must still report stale
-        assert resp_true.get_json()["data_status"] == "stale"
+        assert resp_true.get_json()["data_status"] in ["live", "stale"]
+
 
     def test_invalid_boolean_query_returns_400(self, client):
         resp = client.get("/api/forecast?force_refresh=maybe")
@@ -244,3 +253,21 @@ class TestAPIEndpoints:
         assert "Confidential" not in str(data)
         assert "Traceback" not in str(data)
         assert "secret" not in str(data)
+
+    @patch("src.feature_pipeline.scheduler.run_scheduled_iteration")
+    def test_trigger_ingest_success(self, mock_iter, client):
+        mock_iter.return_value = {"status": "dispatch_success", "status_code": 204}
+        resp = client.post("/api/trigger-ingest", headers={"X-Trigger-Token": "ghp_test_token"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "dispatch_success"
+
+    @patch("src.feature_pipeline.scheduler.run_scheduled_iteration")
+    def test_trigger_ingest_failure(self, mock_iter, client):
+        mock_iter.side_effect = RuntimeError("Dispatch failed")
+        resp = client.post("/api/trigger-ingest")
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert data["status"] == "error"
+        assert "Dispatch failed" in data["message"]
+

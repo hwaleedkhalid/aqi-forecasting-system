@@ -99,7 +99,17 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "timestamp": now.isoformat(),
         }), 500
 
+    # Start background scheduler thread if configured
+    if os.environ.get("ENABLE_BACKGROUND_SCHEDULER", "false").lower() in {"true", "1"}:
+        try:
+            from src.feature_pipeline.scheduler import start_background_scheduler
+            target_min = int(os.environ.get("SCHEDULER_MINUTE", "15"))
+            start_background_scheduler(target_minute=target_min)
+        except Exception as e:
+            logger.warning(f"Failed to start background scheduler thread: {e}")
+
     return app
+
 
 
 # Canonical module-level WSGI application instance
