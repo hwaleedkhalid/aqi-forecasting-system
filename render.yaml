@@ -26,8 +26,8 @@ services:
     plan: starter
     region: frankfurt
     schedule: "15 * * * *"
-    buildCommand: pip install requests
-    startCommand: python -m src.feature_pipeline.scheduler --dispatch-now
+    buildCommand: echo "Ready"
+    startCommand: python trigger_dispatch.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
