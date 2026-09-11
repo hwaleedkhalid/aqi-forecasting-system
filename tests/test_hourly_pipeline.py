@@ -334,3 +334,63 @@ class TestHourlyPipelineExecution:
 
         assert (now_ts - fresh_ts) <= (3 * 3600)  # fresh
         assert (now_ts - stale_ts) > (3 * 3600)   # stale
+
+    @patch("src.feature_pipeline.run_hourly_ingestion.HopsworksFeatureStoreConnector")
+    @patch("src.feature_pipeline.run_hourly_ingestion.fetch_hourly_telemetry_window")
+    def test_live_mode_online_parity_success(self, mock_fetch, mock_conn_cls, tmp_path):
+        """Live mode confirms online store parity after insert."""
+        end_dt = 1788793200
+        df_aq, df_weather = _generate_synthetic_telemetry(end_dt=end_dt, hours=72)
+        mock_fetch.return_value = (df_aq, df_weather)
+
+        mock_conn = MagicMock()
+        mock_conn.prepare_storage_dataframe.side_effect = lambda df: pd.concat([pd.DataFrame({"location_id": ["lahore"]}), df], axis=1)
+        mock_conn.insert_hourly_feature_row.return_value = {"status": "hourly_ingestion_success", "observation_dt": end_dt}
+        # Online store matches the newly written dt
+        mock_conn.get_latest_feature_vector.return_value = (
+            [1.0] * 114,
+            {"dt": end_dt, "epa_aqi": int(df_aq.iloc[-1]["epa_aqi"])},
+        )
+        mock_conn_cls.return_value = mock_conn
+
+        report = run_hourly_pipeline(
+            dry_run=False,
+            live=True,
+            lookback_hours=72,
+            output_dir=tmp_path,
+        )
+
+        assert report["status"] == "live_ingestion_success"
+        assert report["online_parity"] == "SUCCESS"
+        assert report["duration_seconds"] >= 0
+
+    @patch("src.feature_pipeline.run_hourly_ingestion.HopsworksFeatureStoreConnector")
+    @patch("src.feature_pipeline.run_hourly_ingestion.fetch_hourly_telemetry_window")
+    def test_live_mode_online_parity_mismatch_raises_error(self, mock_fetch, mock_conn_cls, tmp_path):
+        """Live mode fails loudly if online store returns an older or mismatching timestamp after insert."""
+        from src.exceptions import FeatureStoreError
+
+        end_dt = 1788793200
+        df_aq, df_weather = _generate_synthetic_telemetry(end_dt=end_dt, hours=72)
+        mock_fetch.return_value = (df_aq, df_weather)
+
+        mock_conn = MagicMock()
+        mock_conn.prepare_storage_dataframe.side_effect = lambda df: pd.concat([pd.DataFrame({"location_id": ["lahore"]}), df], axis=1)
+        mock_conn.insert_hourly_feature_row.return_value = {"status": "hourly_ingestion_success", "observation_dt": end_dt}
+        # Online store returns a stale dt
+        mock_conn.get_latest_feature_vector.return_value = (
+            [1.0] * 114,
+            {"dt": end_dt - 3600, "epa_aqi": 50},
+        )
+        mock_conn_cls.return_value = mock_conn
+
+        with pytest.raises(FeatureStoreError) as exc_info:
+            run_hourly_pipeline(
+                dry_run=False,
+                live=True,
+                lookback_hours=72,
+                output_dir=tmp_path,
+            )
+
+        assert "Online store parity verification failed" in str(exc_info.value)
+

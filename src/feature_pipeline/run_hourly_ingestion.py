@@ -366,6 +366,9 @@ def run_hourly_pipeline(
     Returns:
         Structured snapshot execution report.
     """
+    import time
+    start_time = time.time()
+
     if output_dir is None:
         output_dir = SNAPSHOT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -381,6 +384,10 @@ def run_hourly_pipeline(
             df_aq, df_weather = fetch_hourly_telemetry_window(
                 lookback_hours=lookback_hours, api_key=api_key
             )
+            ow_latest_dt = int(df_aq["dt"].max())
+            om_weather_dts = (df_weather["datetime_utc"].astype("int64") // 10**9).values
+            om_latest_dt = int(om_weather_dts[om_weather_dts <= int(now_utc.timestamp())].max()) if len(om_weather_dts) > 0 else ow_latest_dt
+
             T = derive_production_timestamp(df_aq, df_weather, now_utc=now_utc)
             validate_hourly_grid_continuity(df_aq, df_weather, production_timestamp=T)
             canonical_row = construct_canonical_feature_dataframe(df_aq, df_weather, production_timestamp=T)
@@ -389,9 +396,12 @@ def run_hourly_pipeline(
             storage_df = conn.prepare_storage_dataframe(canonical_row)
             storage_cols_count = len(storage_df.columns) if isinstance(storage_df, pd.DataFrame) else len(canonical_row.columns) + 1
             mode_desc = "dry_run_live_telemetry"
+            prev_fs_str = "N/A (dry-run)"
         except Exception as e_live:
             logger.warning(f"Dry-run live fetch skipped or failed ({e_live}); falling back to local dataset validation.")
             # Fallback for offline CI without API keys
+            ow_latest_dt = int(now_utc.timestamp())
+            om_latest_dt = int(now_utc.timestamp())
             features_file = PROCESSED_DATA_DIR / "features_v2_weather.csv"
             if features_file.exists():
                 local_df = pd.read_csv(features_file, nrows=100)
@@ -412,9 +422,11 @@ def run_hourly_pipeline(
             storage_df = conn.prepare_storage_dataframe(canonical_row)
             storage_cols_count = len(storage_df.columns) if isinstance(storage_df, pd.DataFrame) else len(canonical_row.columns) + 1
             mode_desc = "dry_run_local_fallback"
+            prev_fs_str = "N/A (dry-run)"
 
         age_seconds = int(now_utc.timestamp()) - obs_dt
         is_stale = age_seconds > (3 * 3600)
+        duration_s = time.time() - start_time
 
         report = {
             "status": "dry_run_success",
@@ -428,13 +440,35 @@ def run_hourly_pipeline(
             "canonical_features_count": len(canonical_row.columns),
             "storage_columns_count": storage_cols_count,
             "hopsworks_mutated": False,
+            "duration_seconds": round(duration_s, 2),
             "message": "Dry-run validation completed successfully; Hopsworks was not mutated.",
         }
+
+        # Structured §18 observability logging
+        logger.info(
+            f"\n============================================================\n"
+            f"HOURLY FEATURE UPDATE (DRY-RUN)\n"
+            f"Run: {executed_at}\n"
+            f"OpenWeather latest: {datetime.fromtimestamp(ow_latest_dt, tz=timezone.utc).isoformat()}\n"
+            f"Open-Meteo latest: {datetime.fromtimestamp(om_latest_dt, tz=timezone.utc).isoformat()}\n"
+            f"Selected T: {datetime.fromtimestamp(obs_dt, tz=timezone.utc).isoformat()}\n"
+            f"Previous FS row: {prev_fs_str}\n"
+            f"Schema: {len(canonical_row.columns)}/114\n"
+            f"Write: SKIPPED (dry-run)\n"
+            f"Online parity: SKIPPED (dry-run)\n"
+            f"Current AQI: {current_aqi}\n"
+            f"Duration: {duration_s:.2f}s\n"
+            f"============================================================"
+        )
     else:
         logger.info("Executing hourly feature pipeline in LIVE mode.")
         df_aq, df_weather = fetch_hourly_telemetry_window(
             lookback_hours=lookback_hours, api_key=api_key
         )
+        ow_latest_dt = int(df_aq["dt"].max())
+        om_weather_dts = (df_weather["datetime_utc"].astype("int64") // 10**9).values
+        om_latest_dt = int(om_weather_dts[om_weather_dts <= int(now_utc.timestamp())].max()) if len(om_weather_dts) > 0 else ow_latest_dt
+
         T = derive_production_timestamp(df_aq, df_weather, now_utc=now_utc)
         validate_hourly_grid_continuity(df_aq, df_weather, production_timestamp=T)
         canonical_row = construct_canonical_feature_dataframe(df_aq, df_weather, production_timestamp=T)
@@ -445,8 +479,51 @@ def run_hourly_pipeline(
         age_seconds = int(now_utc.timestamp()) - obs_dt
         is_stale = age_seconds > (3 * 3600)
 
-        logger.info(f"Publishing observation T={obs_dt} to Hopsworks Feature Store...")
+        # Pre-read current online state
+        prev_dt = None
+        try:
+            _, meta_before = conn.get_latest_feature_vector()
+            prev_dt = meta_before.get("dt")
+        except Exception as e_pre:
+            logger.debug(f"Pre-read online store notice: {e_pre}")
+        prev_fs_str = datetime.fromtimestamp(int(prev_dt), tz=timezone.utc).isoformat() if prev_dt else "None"
+
+        logger.info(f"Publishing observation T={obs_dt} ({datetime.fromtimestamp(obs_dt, tz=timezone.utc).isoformat()}) to Hopsworks Feature Store...")
         hw_result = conn.insert_hourly_feature_row(canonical_row, wait_for_job=False)
+
+        # Post-write Online Parity Verification
+        online_parity = "SUCCESS"
+        try:
+            online_vec, online_meta = conn.get_latest_feature_vector()
+            online_dt = int(online_meta.get("dt", 0))
+            if online_dt != obs_dt:
+                online_parity = f"MISMATCH (online_dt={online_dt} != obs_dt={obs_dt})"
+                logger.error(f"Online store parity verification failed: {online_parity}")
+                raise FeatureStoreError(f"Online store parity verification failed: wrote dt={obs_dt}, but online store returned dt={online_dt}")
+        except FeatureStoreError:
+            raise
+        except Exception as e_post:
+            logger.warning(f"Online store parity read check note: {e_post}")
+            online_parity = f"WARNING ({e_post})"
+
+        duration_s = time.time() - start_time
+
+        # Structured §18 observability logging
+        logger.info(
+            f"\n============================================================\n"
+            f"HOURLY FEATURE UPDATE\n"
+            f"Run: {executed_at}\n"
+            f"OpenWeather latest: {datetime.fromtimestamp(ow_latest_dt, tz=timezone.utc).isoformat()}\n"
+            f"Open-Meteo latest: {datetime.fromtimestamp(om_latest_dt, tz=timezone.utc).isoformat()}\n"
+            f"Selected T: {datetime.fromtimestamp(obs_dt, tz=timezone.utc).isoformat()}\n"
+            f"Previous FS row: {prev_fs_str}\n"
+            f"Schema: {len(canonical_row.columns)}/114\n"
+            f"Write: SUCCESS\n"
+            f"Online parity: {online_parity}\n"
+            f"Current AQI: {current_aqi}\n"
+            f"Duration: {duration_s:.2f}s\n"
+            f"============================================================"
+        )
 
         report = {
             "status": "live_ingestion_success",
@@ -461,6 +538,8 @@ def run_hourly_pipeline(
             "storage_columns_count": storage_cols_count,
             "hopsworks_mutated": True,
             "hopsworks_result": hw_result,
+            "online_parity": online_parity,
+            "duration_seconds": round(duration_s, 2),
             "message": "Hourly observation successfully engineered and ingested into Hopsworks Feature Store.",
         }
 
