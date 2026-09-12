@@ -1,17 +1,11 @@
 """Pearls AQI Predictor - Dashboard UI Components.
 
-Reusable rendering components and Plotly chart builders for the modern Streamlit
-dashboard.  All public function signatures are preserved for test compatibility.
-The information architecture has been completely redesigned:
+Streamlit-native rendering components and Plotly chart builders for the modern
+dark-themed environmental intelligence dashboard.
 
-  Hero (Current AQI | 72h Outlook)
-  → Compact alert/status
-  → Chart
-  → Milestones
-  → Pollutants + Weather
-  → Health Guidance
-  → Advanced Insights (SHAP)
-  → Model & System Details
+Components use native Streamlit primitives:
+  st.container(), st.columns(), st.metric(), st.caption(), st.info(),
+  st.warning(), st.error(), st.tabs(), st.expander(), st.plotly_chart().
 """
 
 from __future__ import annotations
@@ -72,20 +66,20 @@ except ImportError:
     )
 
 
-# ── Speedometer / AQI Gauge ──────────────────────────────────────────────────
+# ── Speedometer / AQI Gauge (Dark Theme Aligned) ─────────────────────────────
 
 def build_aqi_gauge_figure(current_aqi: float | None, category: str = "") -> go.Figure:
-    """Build semi-circular Plotly speedometer/gauge for current AQI.
+    """Build semi-circular Plotly speedometer/gauge for current observed AQI.
 
     Shows 6 EPA ranges: Good (0-50), Moderate (51-100), Sensitive (101-150),
     Unhealthy (151-200), Very Unhealthy (201-300), Hazardous (301-500).
 
     Args:
-        current_aqi: Current AQI numeric value.
+        current_aqi: Current observed AQI numeric value.
         category: AQI category string for needle/bar accent color.
 
     Returns:
-        Plotly Figure instance.
+        Plotly Figure instance with dark theme styling.
     """
     val = float(current_aqi) if current_aqi is not None else 0.0
     accent = category_color(category)
@@ -101,18 +95,18 @@ def build_aqi_gauge_figure(current_aqi: float | None, category: str = "") -> go.
                     tickmode="array",
                     tickvals=[0, 50, 100, 150, 200, 300, 500],
                     ticktext=["0", "50", "100", "150", "200", "300", "500"],
-                    tickfont=dict(size=9, color="#6B7280"),
+                    tickfont=dict(size=9, color="#94A3B8"),
                 ),
-                bar=dict(color=accent, thickness=0.3),
-                bgcolor="rgba(0,0,0,0.03)",
+                bar=dict(color=accent, thickness=0.32),
+                bgcolor="rgba(255, 255, 255, 0.05)",
                 borderwidth=0,
                 steps=[
-                    dict(range=[0, 50], color="rgba(34, 197, 94, 0.40)"),
-                    dict(range=[50, 100], color="rgba(234, 179, 8, 0.40)"),
-                    dict(range=[100, 150], color="rgba(249, 115, 22, 0.40)"),
-                    dict(range=[150, 200], color="rgba(239, 68, 68, 0.40)"),
-                    dict(range=[200, 300], color="rgba(139, 92, 246, 0.40)"),
-                    dict(range=[300, 500], color="rgba(127, 29, 29, 0.40)"),
+                    dict(range=[0, 50], color="rgba(34, 197, 94, 0.45)"),
+                    dict(range=[50, 100], color="rgba(234, 179, 8, 0.45)"),
+                    dict(range=[100, 150], color="rgba(249, 115, 22, 0.45)"),
+                    dict(range=[150, 200], color="rgba(239, 68, 68, 0.45)"),
+                    dict(range=[200, 300], color="rgba(139, 92, 246, 0.45)"),
+                    dict(range=[300, 500], color="rgba(127, 29, 29, 0.65)"),
                 ],
             ),
         )
@@ -127,14 +121,14 @@ def build_aqi_gauge_figure(current_aqi: float | None, category: str = "") -> go.
     return fig
 
 
-# ── Forecast chart ────────────────────────────────────────────────────────────
+# ── Forecast chart (Dark Theme Aligned) ──────────────────────────────────────
 
 def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
     """Build interactive Plotly figure for the 72-hour AQI forecast.
 
     Preserves all scientific content: point values, empirical error band,
     151 / 201 / 301 EPA threshold reference lines, UTC timestamps.
-    Adds subtle horizontal colored AQI category background zones.
+    Dark navy background aligned with environmental command center theme.
 
     Args:
         forecasts: List of 72 forecast horizon dictionaries matching contract.
@@ -171,21 +165,21 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
             mode="lines",
             line=dict(width=0),
             fill="tonexty",
-            fillcolor="rgba(30, 58, 95, 0.12)",
+            fillcolor="rgba(56, 189, 248, 0.15)",
             name="Empirical Error Range (Walk-forward 10th–90th out-of-fold residuals)",
             hoverinfo="skip",
         )
     )
 
-    # 2. Predicted AQI main curve
+    # 2. Predicted AQI main curve (High-contrast cyan line)
     fig.add_trace(
         go.Scatter(
             x=times,
             y=aqis,
             mode="lines+markers",
             name="Predicted AQI (EXP-019)",
-            line=dict(color="#1E3A5F", width=2.5),
-            marker=dict(size=3.5, color="#1E3A5F"),
+            line=dict(color="#38BDF8", width=2.5),
+            marker=dict(size=4, color="#38BDF8"),
             customdata=custom_data,
             hovertemplate=(
                 "<b>Horizon:</b> +%{customdata[0]}h<br>"
@@ -206,7 +200,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
         line_width=1.2,
         annotation_text="Unhealthy (151)",
         annotation_position="top left",
-        annotation_font=dict(color="#EF4444", size=9),
+        annotation_font=dict(color="#F87171", size=9),
     )
     fig.add_hline(
         y=201,
@@ -215,7 +209,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
         line_width=1.2,
         annotation_text="Very Unhealthy (201)",
         annotation_position="top left",
-        annotation_font=dict(color="#8B5CF6", size=9),
+        annotation_font=dict(color="#A78BFA", size=9),
     )
     fig.add_hline(
         y=301,
@@ -224,18 +218,18 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
         line_width=1.2,
         annotation_text="Hazardous (301)",
         annotation_position="top left",
-        annotation_font=dict(color="#7F1D1D", size=9),
+        annotation_font=dict(color="#FCA5A5", size=9),
     )
 
-    # 4. Background colored category bands (subtle opacity 0.04)
+    # 4. Background colored category bands (subtle dark opacity)
     max_val = max(max(uppers), max(aqis), 350.0)
     zones = [
-        (0, 50, "rgba(34, 197, 94, 0.04)"),
-        (50, 100, "rgba(234, 179, 8, 0.04)"),
-        (100, 150, "rgba(249, 115, 22, 0.04)"),
-        (150, 200, "rgba(239, 68, 68, 0.04)"),
-        (200, 300, "rgba(139, 92, 246, 0.04)"),
-        (300, max(500.0, max_val + 20.0), "rgba(127, 29, 29, 0.04)"),
+        (0, 50, "rgba(34, 197, 94, 0.03)"),
+        (50, 100, "rgba(234, 179, 8, 0.03)"),
+        (100, 150, "rgba(249, 115, 22, 0.03)"),
+        (150, 200, "rgba(239, 68, 68, 0.03)"),
+        (200, 300, "rgba(139, 92, 246, 0.03)"),
+        (300, max(500.0, max_val + 20.0), "rgba(127, 29, 29, 0.06)"),
     ]
     for y0, y1, fill in zones:
         fig.add_hrect(
@@ -246,26 +240,26 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
             layer="below",
         )
 
-    # 5. Layout
+    # 5. Layout (Dark theme with crisp contrast)
     fig.update_layout(
-        paper_bgcolor="#FFFFFF",
-        plot_bgcolor="#FAFAFA",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0A1628",
         title=dict(text="", font=dict(size=1)),
         xaxis=dict(
             title="Forecast Target Time (UTC)",
             showgrid=True,
-            gridcolor="rgba(0,0,0,0.05)",
-            tickfont=dict(size=10, color="#6B7280"),
-            title_font=dict(size=11, color="#6B7280"),
+            gridcolor="rgba(34, 50, 74, 0.6)",
+            tickfont=dict(size=10, color="#94A3B8"),
+            title_font=dict(size=11, color="#94A3B8"),
         ),
         yaxis=dict(
             title="Air Quality Index (AQI)",
             rangemode="nonnegative",
             range=[0, max_val + 20],
             showgrid=True,
-            gridcolor="rgba(0,0,0,0.05)",
-            tickfont=dict(size=10, color="#6B7280"),
-            title_font=dict(size=11, color="#6B7280"),
+            gridcolor="rgba(34, 50, 74, 0.6)",
+            tickfont=dict(size=10, color="#94A3B8"),
+            title_font=dict(size=11, color="#94A3B8"),
         ),
         legend=dict(
             title=dict(text=""),
@@ -274,7 +268,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
             y=1.01,
             xanchor="right",
             x=1.0,
-            font=dict(size=10, color="#6B7280"),
+            font=dict(size=10, color="#94A3B8"),
         ),
         margin=dict(l=50, r=30, t=30, b=50),
         hovermode="x unified",
@@ -287,10 +281,7 @@ def build_forecast_figure(forecasts: list[dict[str, Any]]) -> go.Figure:
 # ── Freshness / Alert banners ─────────────────────────────────────────────────
 
 def render_freshness_banner(is_stale: bool, observed_at: str, age_hours: float) -> None:
-    """Render explicit warning banner when input telemetry is historical.
-
-    Preserved for backward compatibility; called internally by render_alert_banners.
-    """
+    """Render explicit warning banner when input telemetry is historical."""
     if is_stale:
         st.warning(
             f"⚠️ **Telemetry Notice**: Latest available observation is historical "
@@ -300,7 +291,7 @@ def render_freshness_banner(is_stale: bool, observed_at: str, age_hours: float) 
 
 
 def render_alert_banners(obs_data: dict[str, Any], forecast_data: dict[str, Any]) -> None:
-    """Render a compact, unified alert area.
+    """Render a compact, unified alert area using native Streamlit alert components.
 
     Priority hierarchy (semantics preserved from alerting.py):
     1. Current Severe / Hazardous → st.error
@@ -309,8 +300,6 @@ def render_alert_banners(obs_data: dict[str, Any], forecast_data: dict[str, Any]
     4. Current or Forecast Advisory → st.info (only if no warning above)
     5. Stale notice → compact st.caption line
     6. Uncertainty tail-risk → st.expander (collapsed by default)
-
-    Only ONE primary banner renders. Stale and uncertainty are subordinate.
 
     Args:
         obs_data: Latest observation dictionary matching API contract.
@@ -416,25 +405,20 @@ def render_alert_banners(obs_data: dict[str, Any], forecast_data: dict[str, Any]
 # ── Current observation card (LEFT hero column) ───────────────────────────────
 
 def render_current_observation_card(obs: dict[str, Any]) -> None:
-    """Render the left hero column: large current AQI, gauge, category, factors, freshness.
+    """Render the left hero column with native Streamlit container & metrics.
 
     Args:
         obs: Latest observation dictionary matching API contract.
     """
-    aqi_val = obs.get("current_aqi", 0.0)
+    aqi_val = obs.get("current_aqi")
     category = obs.get("category", "Unknown")
-    color = obs.get("color") or category_color(category)
-    solid_text_col = category_solid_text_color(category)
     dominant = obs.get("dominant_pollutant", "pm2_5")
     feature_source = obs.get("feature_source", "")
     fallback_active = obs.get("fallback_active", False)
     is_stale = obs.get("is_stale", False)
     age_hours = obs.get("input_age_hours")
-    card_cls = category_card_class(category)
 
-    badge_class = source_badge_class(feature_source, fallback_active, is_stale)
     source_name = source_display_name(feature_source, fallback_active, is_stale)
-
     if is_stale:
         freshness_line = format_stale_age(age_hours)
     else:
@@ -452,37 +436,17 @@ def render_current_observation_card(obs: dict[str, Any]) -> None:
     wind_str = safe_val(weather.get("wind_speed_10m"), "m/s", 1)
 
     icon = category_icon(category)
-    gauge_fig = build_aqi_gauge_figure(aqi_val, category)
+    gauge_fig = build_aqi_gauge_figure(float(aqi_val) if aqi_val is not None else 0.0, category)
 
     st.markdown(
-        f"""
-<div class="{card_cls}">
-  <div class="prl-hero-top">
-    <div>
-      <div class="prl-card-title">Current Air Quality · Lahore</div>
-      <div class="prl-hero-aqi">{aqi_display}<span class="prl-hero-aqi-unit">AQI</span></div>
-    </div>
-    <div>
-      <span class="prl-category-pill" style="background:{color};color:{solid_text_col};">{icon} {category}</span>
-    </div>
-  </div>
-
-  <div class="prl-observed-factors">
-    <div class="prl-observed-factors-title">What is affecting air quality now?</div>
-    <b>Primary factor:</b> {dominant.upper().replace("_", ".")} ({dom_val_str})<br>
-    <b>Weather telemetry:</b> Temp {temp_str} · Wind {wind_str}
-  </div>
-
-  <div class="prl-hero-meta">
-    {freshness_line}<br>
-    <span class="{badge_class}">{source_name}</span>
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
+        f"### Current Air Quality · Lahore\n\n"
+        f"**Observed AQI:** `{aqi_display}` ({icon} {category})  \n"
+        f"**What is affecting air quality now?**  \n"
+        f"• **Primary factor:** {dominant.upper().replace('_', '.')} ({dom_val_str})  \n"
+        f"• **Weather telemetry:** Temp {temp_str} · Wind {wind_str}  \n"
+        f"*{freshness_line} · Source: {source_name}*"
     )
     st.plotly_chart(gauge_fig, use_container_width=True, config={"displayModeBar": False})
-
 
 
 # ── 72h Outlook card (RIGHT hero column) ─────────────────────────────────────
@@ -491,7 +455,7 @@ def render_72h_outlook_card(
     forecast_data: dict[str, Any],
     current_category: str = "",
 ) -> None:
-    """Render the right hero column: 72-hour outlook summary and future progression.
+    """Render the right hero column with native Streamlit container and metrics.
 
     Args:
         forecast_data: Forecast result dictionary matching API contract.
@@ -511,72 +475,32 @@ def render_72h_outlook_card(
     first_very = f_alert.get("first_very_unhealthy_horizon")
     first_haz = f_alert.get("first_hazardous_horizon")
 
-    peak_color = category_color(peak_cat)
-    peak_text = category_solid_text_color(peak_cat)
     peak_aqi_str = f"{peak_aqi:.0f}" if peak_aqi is not None else "—"
-    card_cls = category_card_class(peak_cat)
-
     curr_cat = current_category or "Moderate"
-    curr_color = category_color(curr_cat)
-    curr_text = category_solid_text_color(curr_cat)
-
-    # Future-risk progression indicator
     peak_h_tag = f"+{peak_h}h" if peak_h is not None else "72h"
-    progression_html = f"""
-<div class="prl-progression-container">
-  <div class="prl-progression-step">
-    <span class="prl-progression-tag">Now</span>
-    <span class="prl-category-pill" style="background:{curr_color};color:{curr_text};font-size:0.75rem;padding:2px 8px;">{curr_cat}</span>
-  </div>
-  <span class="prl-progression-arrow">──→</span>
-  <div class="prl-progression-step" style="text-align:right;">
-    <span class="prl-progression-tag">Peak ({peak_h_tag})</span>
-    <span class="prl-category-pill" style="background:{peak_color};color:{peak_text};font-size:0.75rem;padding:2px 8px;">{peak_cat}</span>
-  </div>
-</div>
-"""
 
-    # Build outlook rows
-    rows_html = ""
-
-    def _row(label: str, value: str) -> str:
-        return (
-            f'<div style="margin-top:8px;">'
-            f'<div class="prl-outlook-label">{label}</div>'
-            f'<div class="prl-outlook-value">{value}</div>'
-            f"</div>"
-        )
-
-    rows_html += _row("Highest Category", f'<span class="prl-category-pill" style="background:{peak_color};color:{peak_text};font-size:0.78rem;padding:2px 10px;">{peak_cat}</span>')
-
+    rows = [
+        f"• **Highest Category:** `{peak_cat}`"
+    ]
     if first_unhealthy:
-        rows_html += _row("First Unhealthy Hour", f'<span class="prl-horizon-tag">{format_horizon_label(first_unhealthy)}</span>')
+        rows.append(f"• **First Unhealthy Hour:** `{format_horizon_label(first_unhealthy)}`")
     if first_very:
-        rows_html += _row("First Very Unhealthy Hour", f'<span class="prl-horizon-tag" style="background:#FAF5FF;color:#6D28D9;border:1px solid #E9D5FF;">{format_horizon_label(first_very)}</span>')
+        rows.append(f"• **First Very Unhealthy Hour:** `{format_horizon_label(first_very)}`")
     if first_haz:
-        rows_html += _row("First Hazardous Hour", f'<span class="prl-horizon-tag" style="background:#FFF1F2;color:#9F1239;border:1px solid #FFE4E6;">{format_horizon_label(first_haz)}</span>')
+        rows.append(f"• **First Hazardous Hour:** `{format_horizon_label(first_haz)}`")
     if not first_unhealthy and not first_very and not first_haz:
-        rows_html += _row(
-            "72h Status",
-            '<span class="prl-no-outlook">✅ Good / Moderate throughout</span>',
-        )
+        rows.append("• **72h Status:** `✅ Good / Moderate throughout`")
 
     if peak_h:
-        rows_html += _row("Peak Horizon", f'<span class="prl-horizon-tag">{format_horizon_label(peak_h)}</span>')
+        rows.append(f"• **Peak Horizon:** `{format_horizon_label(peak_h)}`")
+
+    rows_str = "  \n".join(rows)
 
     st.markdown(
-        f"""
-<div class="{card_cls}">
-  <div class="prl-card-title">72-Hour Outlook</div>
-  <div style="margin-bottom:2px;">
-    <span style="font-size:0.75rem;color:#6B7280;">Peak AQI</span>
-  </div>
-  <div class="prl-outlook-peak">{peak_aqi_str}</div>
-  {progression_html}
-  {rows_html}
-</div>
-""",
-        unsafe_allow_html=True,
+        f"### 72-Hour Outlook\n\n"
+        f"**Peak Predicted AQI:** `{peak_aqi_str}` ({peak_cat})  \n"
+        f"**Progression:** `Now ({curr_cat})` ──→ `Peak ({peak_cat} at {peak_h_tag})`  \n\n"
+        f"{rows_str}"
     )
 
 
@@ -590,16 +514,12 @@ def render_metadata_header(
 ) -> None:
     """Render compact user-friendly status line.
 
-    Full provenance (raw timestamps, latency) is displayed in the Model & System
-    Details expander, not here.
-
     Args:
         forecast_origin: ISO timestamp of observation used as forecast anchor.
         generated_at: ISO timestamp when forecast was generated.
         source_mode: Data source mode string.
         latency_ms: Inference latency in milliseconds.
     """
-    # Derive user-friendly age from forecast_origin
     from datetime import datetime, timezone
 
     age_str = "—"
@@ -613,7 +533,6 @@ def render_metadata_header(
     except Exception:
         age_str = format_timestamp(forecast_origin)
 
-    # Source label
     if "REST API" in (source_mode or "") or source_mode == "REST API":
         src_label = "Hopsworks"
     elif "Direct Local" in (source_mode or ""):
@@ -621,19 +540,13 @@ def render_metadata_header(
     else:
         src_label = source_mode or "Unknown"
 
-    st.markdown(
-        f'<div class="prl-status-line">'
-        f'<span class="prl-status-dot"></span>'
-        f"Updated {age_str} &nbsp;·&nbsp; {src_label}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"🟢 **Status:** Updated {age_str} · {src_label} · Latency: {latency_ms:.1f} ms")
 
 
 # ── Telemetry breakdown (Pollutants + Weather) ────────────────────────────────
 
 def render_telemetry_breakdown(obs: dict[str, Any]) -> None:
-    """Render compact two-card pollutant and weather grid.
+    """Render compact pollutant and weather metrics using native Streamlit layout.
 
     Args:
         obs: Latest observation dictionary matching API contract.
@@ -651,20 +564,10 @@ def render_telemetry_breakdown(obs: dict[str, Any]) -> None:
         co = safe_val(pollutants.get("co"), "µg/m³", 1)
         o3 = safe_val(pollutants.get("o3"), "µg/m³", 1)
         st.markdown(
-            f"""
-<div class="prl-card">
-  <div class="prl-card-title">Air Pollutants</div>
-  <div class="prl-metric-grid">
-    <div class="prl-metric-pill"><div class="prl-metric-label">PM2.5</div><div class="prl-metric-value">{pm25}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">PM10</div><div class="prl-metric-value">{pm10}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">O₃</div><div class="prl-metric-value">{o3}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">NO₂</div><div class="prl-metric-value">{no2}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">SO₂</div><div class="prl-metric-value">{so2}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">CO</div><div class="prl-metric-value">{co}</div></div>
-  </div>
-</div>
-""",
-            unsafe_allow_html=True,
+            f"**Air Pollutants**  \n"
+            f"• **PM2.5:** `{pm25}` · **PM10:** `{pm10}`  \n"
+            f"• **NO₂:** `{no2}` · **SO₂:** `{so2}`  \n"
+            f"• **O₃:** `{o3}` · **CO:** `{co}`"
         )
 
     with col_w:
@@ -673,25 +576,11 @@ def render_telemetry_breakdown(obs: dict[str, Any]) -> None:
         wind = safe_val(weather.get("wind_speed_10m"), "m/s", 1)
         pres = safe_val(weather.get("surface_pressure"), "hPa", 1)
         precip = safe_val(weather.get("precipitation"), "mm", 1) if weather.get("precipitation") is not None else None
-        precip_row = (
-            f'<div class="prl-metric-pill"><div class="prl-metric-label">Precip.</div>'
-            f'<div class="prl-metric-value">{precip}</div></div>'
-            if precip is not None else ""
-        )
+        precip_str = f" · **Precip.:** `{precip}`" if precip is not None else ""
         st.markdown(
-            f"""
-<div class="prl-card">
-  <div class="prl-card-title">Weather Conditions</div>
-  <div class="prl-metric-grid">
-    <div class="prl-metric-pill"><div class="prl-metric-label">Temperature</div><div class="prl-metric-value">{temp}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">Humidity</div><div class="prl-metric-value">{hum}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">Wind</div><div class="prl-metric-value">{wind}</div></div>
-    <div class="prl-metric-pill"><div class="prl-metric-label">Pressure</div><div class="prl-metric-value">{pres}</div></div>
-    {precip_row}
-  </div>
-</div>
-""",
-            unsafe_allow_html=True,
+            f"**Weather Conditions**  \n"
+            f"• **Temperature:** `{temp}` · **Humidity:** `{hum}`  \n"
+            f"• **Wind:** `{wind}` · **Pressure:** `{pres}`{precip_str}"
         )
 
 
@@ -700,9 +589,6 @@ def render_telemetry_breakdown(obs: dict[str, Any]) -> None:
 def render_health_guidance(obs_data: dict[str, Any], forecast_data: dict[str, Any]) -> None:
     """Render Health Guidance card using category-level advisory text.
 
-    Shows current category advice; optionally shows forecast severity upgrade
-    notice when forecast severity exceeds current severity.
-
     Args:
         obs_data: Latest observation dictionary matching API contract.
         forecast_data: Forecast result dictionary matching API contract.
@@ -710,7 +596,6 @@ def render_health_guidance(obs_data: dict[str, Any], forecast_data: dict[str, An
     category = obs_data.get("category", "Unknown")
     advisory = obs_data.get("health_advisory", "")
     icon = category_icon(category)
-    color = obs_data.get("color") or category_color(category)
 
     # Check if forecast is worse than current
     _rank = {"none": 0, "advisory": 1, "warning": 2, "severe": 3, "hazardous": 4}
@@ -727,27 +612,18 @@ def render_health_guidance(obs_data: dict[str, Any], forecast_data: dict[str, An
     f_peak_cat = f_alert.get("peak_category", "")
     f_peak_h = f_alert.get("peak_horizon")
 
-    upgrade_html = ""
+    upgrade_text = ""
     if f_rank > obs_rank and f_rank >= 2:
-        upgrade_html = (
-            f'<div class="prl-guidance-upgrade">'
-            f"📈 <b>Forecast outlook:</b> Air quality is expected to reach <b>{f_peak_cat}</b> "
-            f"conditions within 72 hours "
-            + (f"(peak at {format_horizon_label(f_peak_h)}). " if f_peak_h else ". ")
-            + "Monitor updates and take precautions."
-            + "</div>"
+        peak_str = f" (peak at {format_horizon_label(f_peak_h)})" if f_peak_h else ""
+        upgrade_text = (
+            f"\n\n📈 **Forecast outlook:** Air quality is expected to reach **{f_peak_cat}** "
+            f"conditions within 72 hours{peak_str}. Monitor updates and take precautions."
         )
 
     st.markdown(
-        f"""
-<div class="prl-guidance-card">
-  <span class="prl-guidance-icon">{icon}</span>
-  <div class="prl-guidance-headline" style="color:{color};">{category}</div>
-  <div class="prl-guidance-body">{advisory or "Air quality information is currently unavailable."}</div>
-  {upgrade_html}
-</div>
-""",
-        unsafe_allow_html=True,
+        f"#### {icon} Health Guidance · {category}\n\n"
+        f"{advisory or 'Air quality information is currently unavailable.'}"
+        f"{upgrade_text}"
     )
 
 
@@ -783,11 +659,15 @@ def render_model_system_details(
             benchmarks = model_info.get("test_benchmark_metrics", {})
             if benchmarks:
                 st.markdown("**Held-Out Test Benchmarks (Phase 10.5E)**")
+                if benchmarks.get("partition"):
+                    st.markdown(f"- **Partition:** `{benchmarks.get('partition')}`")
                 st.markdown(f"- **Overall RMSE:** `{benchmarks.get('overall_rmse')} AQI`")
                 st.markdown(f"- **Overall MAE:** `{benchmarks.get('overall_mae')} AQI`")
                 st.markdown(f"- **Overall R²:** `{benchmarks.get('overall_r2')}`")
                 st.markdown(f"- **h+1 RMSE:** `{benchmarks.get('h1_rmse')} AQI`")
                 st.markdown(f"- **h+72 RMSE:** `{benchmarks.get('h72_rmse')} AQI`")
+                if benchmarks.get("hazardous_gt300_rmse"):
+                    st.markdown(f"- **Hazardous (>300 AQI) RMSE:** `{benchmarks.get('hazardous_gt300_rmse')} AQI`")
 
         with col2:
             st.markdown("**Forecast Provenance**")
@@ -817,26 +697,11 @@ def render_model_system_details(
 # ── Cold-start / connection error state ──────────────────────────────────────
 
 def render_cold_start_error(error: Exception) -> None:
-    """Render user-friendly service-waking-up screen.
-
-    Shows friendly messaging for connection errors; hides raw exception by
-    default with an expandable technical details section.
-
-    Args:
-        error: The caught exception (ConnectionError or similar).
-    """
+    """Render user-friendly service-waking-up screen."""
     st.markdown(
-        """
-<div class="prl-cold-start">
-  <span class="prl-cold-start-icon">🌫️</span>
-  <div class="prl-cold-start-title">Forecast service is waking up</div>
-  <div class="prl-cold-start-body">
-    The forecasting service is starting from standby.
-    This usually takes less than a minute. Click <b>Retry</b> to check again.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
+        "### 🌫️ Forecast service is waking up\n\n"
+        "The forecasting service is starting from standby. "
+        "This usually takes less than a minute. Click **Retry** to check again."
     )
     if st.button("🔄 Retry", help="Check if the service is back online"):
         st.rerun()
@@ -847,20 +712,11 @@ def render_cold_start_error(error: Exception) -> None:
 # ── Sidebar (no-op stub — content moved to Model & System Details) ────────────
 
 def render_sidebar(model_info: dict[str, Any], summary: dict[str, Any], source_mode: str) -> None:
-    """No-op stub. All model/provenance content now lives in render_model_system_details.
-
-    Signature preserved for backward compatibility with existing test imports.
-
-    Args:
-        model_info: Model metadata dictionary (unused — displayed in expander).
-        summary: Forecast summary dictionary (unused — displayed in expander).
-        source_mode: Data source mode string (unused).
-    """
-    # Content intentionally moved to render_model_system_details in app.py.
+    """No-op stub. Preserved for backward compatibility with existing test imports."""
     pass
 
 
-# ── SHAP / Feature attribution ────────────────────────────────────────────────
+# ── SHAP / Feature attribution (Dark Theme Aligned) ──────────────────────────
 
 def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon: int) -> go.Figure:
     """Build horizontal bar chart for top SHAP feature attributions at a specific horizon.
@@ -870,7 +726,7 @@ def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon
         horizon: Forecast horizon number.
 
     Returns:
-        Configured Plotly Figure.
+        Configured Plotly Figure with dark theme styling.
     """
     if not top_features:
         return go.Figure()
@@ -880,7 +736,7 @@ def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon
     shaps_rev = [f["shap_value"] for f in reversed(top_features)]
     raws_rev = [f["raw_value"] for f in reversed(top_features)]
     scaleds_rev = [f["scaled_value"] for f in reversed(top_features)]
-    colors = ["#1E3A5F" if v > 0 else "#6B7280" for v in shaps_rev]
+    colors = ["#EF4444" if v > 0 else "#22C55E" for v in shaps_rev]
 
     custom_data = list(zip(raws_rev, scaleds_rev))
 
@@ -902,23 +758,23 @@ def build_feature_attribution_figure(top_features: list[dict[str, Any]], horizon
     )
 
     fig.update_layout(
-        paper_bgcolor="#FFFFFF",
-        plot_bgcolor="#FAFAFA",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0A1628",
         title=None,
         xaxis=dict(
             title="SHAP Attribution (AQI contribution relative to reference)",
             zeroline=True,
-            zerolinecolor="#9CA3AF",
+            zerolinecolor="#475569",
             zerolinewidth=1.2,
             showgrid=True,
-            gridcolor="rgba(0,0,0,0.05)",
-            tickfont=dict(size=10, color="#6B7280"),
-            title_font=dict(size=10, color="#6B7280"),
+            gridcolor="rgba(34, 50, 74, 0.6)",
+            tickfont=dict(size=10, color="#94A3B8"),
+            title_font=dict(size=10, color="#94A3B8"),
         ),
         yaxis=dict(
             title="",
             automargin=True,
-            tickfont=dict(size=10, color="#374151"),
+            tickfont=dict(size=10, color="#CBD5E1"),
         ),
         margin=dict(l=10, r=20, t=20, b=40),
         height=360,
@@ -983,17 +839,12 @@ def render_explainability_section(explanation: dict[str, Any]) -> None:
 def render_aqi_legend() -> None:
     """Render compact horizontal 6-category AQI scale legend."""
     st.markdown(
-        """
-<div class="prl-aqi-legend">
-  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#22C55E;"></span><b>0–50</b> Good</div>
-  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#EAB308;"></span><b>51–100</b> Moderate</div>
-  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#F97316;"></span><b>101–150</b> Sensitive</div>
-  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#EF4444;"></span><b>151–200</b> Unhealthy</div>
-  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#8B5CF6;"></span><b>201–300</b> Very Unhealthy</div>
-  <div class="prl-legend-item"><span class="prl-legend-dot" style="background:#7F1D1D;"></span><b>301+</b> Hazardous</div>
-</div>
-""",
-        unsafe_allow_html=True,
+        "🟢 **0–50** Good &nbsp;·&nbsp; "
+        "🟡 **51–100** Moderate &nbsp;·&nbsp; "
+        "🟠 **101–150** Sensitive &nbsp;·&nbsp; "
+        "🔴 **151–200** Unhealthy &nbsp;·&nbsp; "
+        "🟣 **201–300** Very Unhealthy &nbsp;·&nbsp; "
+        "🟤 **301+** Hazardous"
     )
 
 
@@ -1023,33 +874,24 @@ def render_forecast_narrative_card(
     if not narratives:
         return
 
-    items_html = ""
+    statements = []
     for n in narratives:
-        arrow_color = "#EF4444" if n["is_upward"] else "#22C55E"
-        items_html += f"""
-<div class="prl-shap-item">
-  <div class="prl-shap-statement">
-    <span style="color:{arrow_color};font-weight:700;margin-right:4px;">{n["arrow"]}</span>
-    <b>{n["human_name"]}</b> contributed {n["direction"]} pressure 
-    <span style="color:#6B7280;">({'+' if n['is_upward'] else ''}{n['shap_value']:.1f} AQI)</span>
-  </div>
-  <span class="prl-shap-badge {n['badge_class']}">{n['strength']}</span>
-</div>
-"""
+        arrow = n["arrow"]
+        name = n["human_name"]
+        direction = n["direction"]
+        shap = n["shap_value"]
+        sign = "+" if n["is_upward"] else ""
+        strength = n["strength"]
+        statements.append(
+            f"• **{arrow} {name}** contributed **{direction} pressure** "
+            f"(`{sign}{shap:.1f} AQI`) · *{strength} impact*"
+        )
+
+    statements_str = "  \n".join(statements)
 
     st.markdown(
-        f"""
-<div class="prl-narrative-card">
-  <div class="prl-narrative-header">
-    <div class="prl-narrative-title">🔍 Why this forecast? (+{horizon}h Key Drivers)</div>
-    <span style="font-size:0.75rem;color:#6B7280;">Attribution relative to model reference</span>
-  </div>
-  {items_html}
-  <div class="prl-narrative-disclaimer">
-    *Attributions indicate statistical feature influence within the EXP-019 hybrid model, not direct physical causality.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
+        f"#### 🔍 Why this forecast? (+{horizon}h Key Drivers)\n\n"
+        f"{statements_str}\n\n"
+        f"**Attribution relative to model reference**  \n"
+        f"*Attributions indicate statistical feature influence within the EXP-019 hybrid model, not direct physical causality.*"
     )
-

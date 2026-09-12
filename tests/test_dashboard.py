@@ -159,11 +159,13 @@ def mock_model_info():
         "feature_schema_version": "v2_weather_enriched",
         "status": "validated_champion",
         "test_benchmark_metrics": {
+            "partition": "Held-out Untouched Out-of-Time Test Set (N=9,311)",
             "overall_rmse": 75.91,
-            "overall_mae": 54.22,
-            "overall_r2": 0.82,
-            "h1_rmse": 18.43,
-            "h72_rmse": 112.87,
+            "overall_mae": 53.55,
+            "overall_r2": 0.4858,
+            "h1_rmse": 50.43,
+            "h72_rmse": 77.43,
+            "hazardous_gt300_rmse": 142.65,
         },
     }
 
@@ -558,9 +560,11 @@ class TestComponentRendering:
             col.__enter__ = lambda s: s
             col.__exit__ = MagicMock(return_value=False)
         with patch("streamlit.columns", return_value=cols_mock), \
-             patch("streamlit.markdown") as mock_md:
+             patch("streamlit.metric") as mock_metric, \
+             patch("streamlit.caption") as mock_caption:
             render_horizon_milestones(mock_forecast["forecasts"])
-            assert mock_md.call_count == 5
+            assert mock_metric.call_count == 5
+            assert mock_caption.call_count == 5
 
     def test_render_telemetry_pollutant_values(self, mock_obs):
         col_mock = MagicMock()

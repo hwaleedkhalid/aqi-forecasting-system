@@ -1,20 +1,19 @@
 """Pearls AQI Predictor - Streamlit Dashboard Application.
 
-Modern, public-facing 72-hour AQI forecast dashboard for Lahore, Pakistan.
+Modern, professional dark-themed 72-hour AQI forecast dashboard for Lahore, Pakistan.
+Built strictly with native Streamlit components and dark-themed Plotly visualizations.
+
 Information architecture (top to bottom):
-
-  1. App header (logo + location + relative time + Refresh)
-  2. Hero: Current AQI (left) | 72-Hour Outlook (right)
+  1. Header: Pearls Air · Lahore AQI Forecast · Provenance status · Refresh button
+  2. Hero (2 columns): Current AQI Hero (left) | 72-Hour Outlook (right)
   3. Compact alert / status area
-  4. 72-Hour AQI Forecast chart
+  4. 72-Hour AQI Forecast visualization & Legend
   5. Milestone cards (+1h +12h +24h +48h +72h)
-  6. Air Pollutants | Weather (compact grids)
-  7. Health Guidance
-  8. Advanced Insights (tabs: Forecast Drivers | Global Importance)
-  9. Model & System Details (collapsed expander)
-
-Backend, ML model, alerting logic, Feature Store, and production artifacts
-are completely unchanged. This module is frontend-only.
+  6. "Why this forecast?" Human-readable SHAP explanation
+  7. Air Pollutants & Weather Telemetry Breakdown
+  8. Health Guidance
+  9. Advanced Insights (Tabs: Forecast Drivers | Global Importance)
+  10. Model & System Details (expander)
 """
 
 from __future__ import annotations
@@ -58,6 +57,7 @@ try:
         category_text_color,
         format_relative_age,
         safe_val,
+        source_display_name,
     )
 except ImportError:
     from components import (  # type: ignore[no-redef]
@@ -85,6 +85,7 @@ except ImportError:
         category_text_color,
         format_relative_age,
         safe_val,
+        source_display_name,
     )
 
 try:
@@ -96,7 +97,7 @@ except Exception:
 
 
 def init_page_config() -> None:
-    """Initialize Streamlit page configuration and inject design system CSS."""
+    """Initialize Streamlit page configuration and inject minimal dark styles."""
     st.set_page_config(
         page_title="Pearls AQI Predictor — Lahore",
         page_icon="🌿",
@@ -108,37 +109,42 @@ def init_page_config() -> None:
 
 def render_app_header(
     age_hours: float | None = None,
+    feature_source: str = "hopsworks",
+    fallback_active: bool = False,
+    is_stale: bool = False,
     force_refresh: bool = False,
     key: str = "refresh_btn",
 ) -> bool:
-    """Render the application header with logo, subtitle, location, and refresh button.
+    """Render the application header with title, subtitle, location, and refresh button.
 
     Args:
         age_hours: Age of the current observation in hours (for relative time display).
+        feature_source: Provenance source string from API.
+        fallback_active: Boolean indicating local fallback.
+        is_stale: Boolean indicating stale telemetry.
         force_refresh: Current state of the refresh button (unused; for signature parity).
         key: Unique Streamlit widget key for the refresh button.
 
     Returns:
         True if the Refresh button was clicked this run, False otherwise.
     """
-    col_left, col_right = st.columns([7, 1], gap="small")
+    col_left, col_right = st.columns([6, 1], gap="small")
 
     with col_left:
-        freshness = f"Updated {format_relative_age(age_hours)}" if age_hours is not None else ""
+        age_text = format_relative_age(age_hours) if age_hours is not None else "unknown time"
+        src_name = source_display_name(feature_source, fallback_active, is_stale)
+        
+        if is_stale:
+            status_badge = f"⚠️ Historical fallback · observed {age_text}"
+        elif fallback_active or feature_source in ("bootstrap", "local_fallback"):
+            status_badge = f"⚠️ Cached fallback · observed {age_text}"
+        else:
+            status_badge = f"🟢 LIVE · {src_name} · observed {age_text}"
+
         st.markdown(
-            f"""
-<div class="prl-app-header">
-  <div class="prl-app-header-left">
-    <div class="prl-app-logo">🌿 Pearls Air</div>
-    <div class="prl-app-subtitle">Lahore Air Quality Forecast &nbsp;·&nbsp; Current conditions and 72-hour outlook</div>
-  </div>
-  <div class="prl-app-header-right">
-    <span class="prl-location-tag">📍 Lahore, Pakistan</span><br>
-    {freshness}
-  </div>
-</div>
-""",
-            unsafe_allow_html=True,
+            f"### 🌿 Pearls Air\n\n"
+            f"**Lahore Air Quality Forecast** · Near-real-time, hourly refreshed 72-hour air quality intelligence.  \n"
+            f"📍 **Lahore, Pakistan** · {status_badge}"
         )
 
     with col_right:
@@ -152,10 +158,10 @@ def render_app_header(
 
 
 def render_horizon_milestones(forecasts: list[dict]) -> None:
-    """Render redesigned milestone cards for key forecast horizons.
+    """Render milestone cards for key forecast horizons using native Streamlit widgets.
 
-    Shows +1h, +12h, +24h, +48h, +72h with category-tinted background,
-    category accent strip, large AQI value, category label, and empirical range.
+    Shows +1h, +12h, +24h, +48h, +72h with AQI value, category label,
+    and empirical prediction error interval.
 
     Args:
         forecasts: List of forecast horizon dictionaries matching API contract.
@@ -177,27 +183,13 @@ def render_horizon_milestones(forecasts: list[dict]) -> None:
         category = item["category"]
         lower = item["error_lower"]
         upper = item["error_upper"]
-        accent = category_color(category)
-        bg = category_bg_color(category)
-        border = category_border_color(category)
-        text_col = category_text_color(category)
 
-        aqi_str = f"{aqi_val:.0f}" if aqi_val is not None else "—"
-        range_str = f"[{safe_val(lower, decimals=0)}, {safe_val(upper, decimals=0)}]"
+        aqi_str = f"AQI {aqi_val:.0f}" if aqi_val is not None else "—"
+        interval_str = f"Empirical interval: {safe_val(lower, decimals=0)}–{safe_val(upper, decimals=0)}"
 
         with col:
-            st.markdown(
-                f"""
-<div class="prl-milestone-card" style="background:{bg};border:1px solid {border};">
-  <div class="prl-milestone-accent" style="background:{accent};"></div>
-  <div class="prl-milestone-horizon">+{h}h</div>
-  <div class="prl-milestone-aqi">{aqi_str}</div>
-  <div class="prl-milestone-cat" style="color:{text_col};">{category}</div>
-  <div class="prl-milestone-range">Range: {range_str}</div>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
+            st.metric(label=f"+{h}h ({category})", value=aqi_str)
+            st.caption(interval_str)
 
 
 def main() -> None:
@@ -234,7 +226,15 @@ def main() -> None:
 
     # ── Header ────────────────────────────────────────────────────────────
     age_hours = obs_data.get("input_age_hours")
-    render_app_header(age_hours=age_hours)
+    feature_src = obs_data.get("feature_source", "hopsworks")
+    fallback_act = obs_data.get("fallback_active", False)
+    is_stale = obs_data.get("is_stale", False)
+    render_app_header(
+        age_hours=age_hours,
+        feature_source=feature_src,
+        fallback_active=fallback_act,
+        is_stale=is_stale,
+    )
 
     # ── 1. Hero: two-column Current AQI + 72h Outlook ─────────────────────
     hero_left, hero_right = st.columns(2, gap="medium")
@@ -244,7 +244,6 @@ def main() -> None:
         render_72h_outlook_card(forecast_data, current_category=obs_data.get("category", ""))
 
     # ── 2. Compact alert / status area ────────────────────────────────────
-    st.markdown("<div style='margin-top:14px;'></div>", unsafe_allow_html=True)
     render_alert_banners(obs_data, forecast_data)
 
     # ── Compact metadata status line ──────────────────────────────────────
@@ -260,7 +259,7 @@ def main() -> None:
     st.divider()
 
     # ── 3. 72-Hour AQI Forecast chart & Legend ────────────────────────────
-    st.markdown('<div class="prl-section-heading">72-Hour AQI Forecast</div>', unsafe_allow_html=True)
+    st.markdown("### 72-Hour AQI Forecast")
     st.caption("Hourly air quality outlook for Lahore · Empirical prediction intervals from walk-forward out-of-fold residuals")
     render_aqi_legend()
 
@@ -281,19 +280,17 @@ def main() -> None:
     st.divider()
 
     # ── 5. Air Pollutants + Weather ───────────────────────────────────────
-    st.markdown('<div class="prl-section-heading">Air Pollutants &amp; Weather</div>', unsafe_allow_html=True)
+    st.markdown("### Air Pollutants & Weather")
     render_telemetry_breakdown(obs_data)
 
-    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
-
     # ── 6. Health Guidance ────────────────────────────────────────────────
-    st.markdown('<div class="prl-section-heading">Health Guidance</div>', unsafe_allow_html=True)
+    st.markdown("### Health Guidance")
     render_health_guidance(obs_data, forecast_data)
 
     st.divider()
 
     # ── 7. Advanced Insights (SHAP) ───────────────────────────────────────
-    st.markdown('<div class="prl-section-heading">Advanced Insights</div>', unsafe_allow_html=True)
+    st.markdown("### Advanced Insights")
     st.caption("Model feature attribution and global importance analysis for EXP-019 hybrid architecture.")
 
     tab_drivers, tab_global = st.tabs(["🔍 Forecast Drivers", "📊 Global Importance"])
@@ -332,7 +329,6 @@ def main() -> None:
     render_model_system_details(model_info, forecast_data, obs_data, forecast_source)
 
     # ── Sidebar: no-op (intentionally empty) ──────────────────────────────
-    # render_sidebar stub kept for import/test compatibility; sidebar is collapsed.
     render_sidebar(model_info, forecast_data.get("summary", {}), forecast_source)
 
 

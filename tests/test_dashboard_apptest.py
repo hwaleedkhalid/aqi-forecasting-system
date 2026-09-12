@@ -280,9 +280,9 @@ class TestAppTestFullRun:
         """Five milestone cards (+1h +12h +24h +48h +72h) appear."""
         at = _make_at()
         assert len(at.exception) == 0
-        all_md = " ".join(e.value for e in at.markdown)
+        all_metric_labels = " ".join(m.label for m in at.metric)
         for h in [1, 12, 24, 48, 72]:
-            assert f"+{h}h" in all_md, f"Milestone card +{h}h not found"
+            assert f"+{h}h" in all_metric_labels, f"Milestone card +{h}h not found"
 
     def test_pollutant_values_in_output(self):
         """PM2.5, NO2, SO2, O3 values appear in the telemetry section."""
